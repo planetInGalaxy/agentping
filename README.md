@@ -7,6 +7,7 @@ The notifier uses Codex `notify` with the `agent-turn-complete` event. It does n
 ## What It Does
 
 - Runs after a Codex answer is complete.
+- Ignores intermediate commentary/status messages and waits for Codex session `task_complete`.
 - Summarizes the full user question and assistant answer with `codex exec`.
 - Sends the summary in PushDeer `text`.
 - Sends a separator plus the original assistant answer in PushDeer `desp`, truncated to `despMaxChars`.
@@ -71,6 +72,7 @@ node scripts/install.mjs --summary-model gpt-5.5
 node scripts/install.mjs --llm-timeout-ms 15000
 node scripts/install.mjs --desp-max-chars 300
 node scripts/install.mjs --desp-separator "\n-----\n"
+node scripts/install.mjs --final-wait-ms 8000
 node scripts/install.mjs --no-desp
 node scripts/install.mjs --no-desp-separator
 node scripts/install.mjs --skip-model-check
@@ -131,7 +133,8 @@ The notifier config stores local runtime settings:
   "summaryModel": "gpt-5.4-mini",
   "llmTimeoutMs": 12000,
   "despMaxChars": 300,
-  "despSeparator": "\n-----\n"
+  "despSeparator": "\n-----\n",
+  "finalWaitMs": 8000
 }
 ```
 
@@ -144,6 +147,7 @@ export CODEX_PUSHDEER_SUMMARY_MODEL=gpt-5.4-mini
 export CODEX_PUSHDEER_LLM_TIMEOUT_MS=12000
 export CODEX_PUSHDEER_DESP_MAX_CHARS=300
 export CODEX_PUSHDEER_DESP_SEPARATOR='\n-----\n'
+export CODEX_PUSHDEER_FINAL_WAIT_MS=8000
 export CODEX_PUSHDEER_ENDPOINT=https://api2.pushdeer.com/message/push
 export CODEX_PUSHDEER_KEY='PDU...'
 ```
@@ -152,6 +156,7 @@ export CODEX_PUSHDEER_KEY='PDU...'
 `CODEX_PUSHDEER_SUMMARY_MODEL` and `CODEX_PUSHDEER_LLM_TIMEOUT_MS` override the stored summary settings.
 `CODEX_PUSHDEER_DESP_MAX_CHARS` overrides the stored `desp` truncation limit. Values above 300 are capped to 300. Set it to `0` to omit `desp`.
 `CODEX_PUSHDEER_DESP_SEPARATOR` overrides the marker placed before the original answer in `desp`; escaped `\n` sequences are converted to newlines. Set it to an empty string to omit the marker.
+`CODEX_PUSHDEER_FINAL_WAIT_MS` controls how long a notify event waits for the Codex session file to show `task_complete`. Intermediate events are skipped if no completed final answer appears within that window.
 
 ## Manual Commands
 
@@ -239,7 +244,7 @@ cd ai-email
 node scripts/install.mjs
 ```
 
-Pin releases with Git tags such as `v0.2.2`.
+Pin releases with Git tags such as `v0.2.3`.
 
 ## Troubleshooting
 

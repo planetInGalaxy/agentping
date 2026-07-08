@@ -7,8 +7,8 @@ import {
   charLength,
   DEFAULT_LLM_TIMEOUT_MS,
   DEFAULT_SUMMARY_MODEL,
-  extractFinalTextFromPayload,
   extractTurnId,
+  findLatestFinalMessage,
   formatDesp,
   hashText,
   loadConfig,
@@ -21,6 +21,8 @@ import {
   takeChars,
   wasAlreadySent,
 } from "./pushdeer-lib.mjs";
+
+const SUMMARY_PROMPT_MARKER = "你是推送通知摘要器";
 
 function loadNotificationArg() {
   const raw = process.argv[2] || "";
@@ -47,6 +49,12 @@ function inputMessagesText(notification) {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function isInternalSummaryNotification(notification) {
+  if (process.env.CODEX_PUSHDEER_SUPPRESS_NOTIFY === "1") return true;
+  const inputText = inputMessagesText(notification);
+  return inputText.includes(SUMMARY_PROMPT_MARKER);
 }
 
 function summarizeWithCodex({ finalText, notification }) {
@@ -99,6 +107,7 @@ function summarizeWithCodex({ finalText, notification }) {
         env: {
           ...process.env,
           CODEX_PUSHDEER_DISABLE_LLM_SUMMARY: "1",
+          CODEX_PUSHDEER_SUPPRESS_NOTIFY: "1",
         },
       },
     );
@@ -137,17 +146,41 @@ async function main() {
     return;
   }
 
-  const finalText =
-    notification["last-assistant-message"] ||
-    notification.lastAssistantMessage ||
-    extractFinalTextFromPayload(notification);
+  if (isInternalSummaryNotification(notification)) {
+    logEvent("info", "Skipping internal PushDeer summary notify event");
+    return;
+  }
 
   const turnId =
     notification["turn-id"] ||
     notification.turnId ||
     extractTurnId(notification);
 
-  const sendId = turnId || hashText(JSON.stringify(notification)).slice(0, 24);
+  const config = loadConfig();
+  const sessionFinal = await findLatestFinalMessage({
+    cwd: process.cwd(),
+    turnId,
+    timeoutMs: config.finalWaitMs,
+    requireTaskComplete: true,
+  });
+
+  if (!sessionFinal?.finalText) {
+    logEvent("info", "Skipping non-final PushDeer notify event", {
+      turnId,
+      finalWaitMs: config.finalWaitMs,
+    });
+    return;
+  }
+
+  if (sessionFinal.userText?.includes(SUMMARY_PROMPT_MARKER)) {
+    logEvent("info", "Skipping internal PushDeer summary session", {
+      turnId: sessionFinal.turnId || turnId,
+    });
+    return;
+  }
+
+  const finalText = sessionFinal.finalText;
+  const sendId = sessionFinal.turnId || turnId || hashText(JSON.stringify(notification)).slice(0, 24);
   if (wasAlreadySent(sendId)) {
     logEvent("info", "Skipping duplicate PushDeer notify event", { sendId });
     return;
@@ -156,7 +189,6 @@ async function main() {
   const fallbackSummary = summarizeFinalText(finalText, notification);
   const llmDescription = summarizeWithCodex({ finalText, notification });
   const pushText = llmDescription || fallbackSummary.desp;
-  const config = loadConfig();
   const pushDesp = formatDesp(finalText, {
     maxChars: config.despMaxChars,
     separator: config.despSeparator,
@@ -176,6 +208,7 @@ async function main() {
     text: pushText,
     despChars: charLength(pushDesp),
     despMaxChars: config.despMaxChars,
+    finalWaitMs: config.finalWaitMs,
     summarySource: llmDescription ? "llm" : "fallback",
     summaryModel: config.summaryModel || DEFAULT_SUMMARY_MODEL,
   });

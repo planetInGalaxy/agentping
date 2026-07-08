@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_DESP_MAX_CHARS,
   DEFAULT_DESP_SEPARATOR,
+  DEFAULT_FINAL_WAIT_MS,
   configPath as pushdeerConfigPath,
   loadConfig,
   redactText,
@@ -43,6 +44,7 @@ function run(command, commandArgs, options = {}) {
     env: {
       ...process.env,
       CODEX_PUSHDEER_DISABLE_LLM_SUMMARY: "1",
+      CODEX_PUSHDEER_SUPPRESS_NOTIFY: "1",
     },
   });
   return {
@@ -130,6 +132,10 @@ const checks = {
     detail: config.despSeparator
       ? JSON.stringify(config.despSeparator)
       : `disabled, default would be ${JSON.stringify(DEFAULT_DESP_SEPARATOR)}`,
+  },
+  finalWaitMs: {
+    ok: config.finalWaitMs >= 0 && config.finalWaitMs <= 60_000,
+    detail: `${config.finalWaitMs}ms, default ${DEFAULT_FINAL_WAIT_MS}ms`,
   },
   notifierLog: logStatus(),
 };

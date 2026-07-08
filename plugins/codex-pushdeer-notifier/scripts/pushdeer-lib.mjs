@@ -9,6 +9,7 @@ export const DEFAULT_SUMMARY_MODEL = "gpt-5.4-mini";
 export const DEFAULT_LLM_TIMEOUT_MS = 12_000;
 export const DEFAULT_DESP_MAX_CHARS = 300;
 export const DEFAULT_DESP_SEPARATOR = "\n-----\n";
+export const DEFAULT_FINAL_WAIT_MS = 8_000;
 
 export function expandHome(value) {
   if (!value) return value;
@@ -155,6 +156,13 @@ export function loadConfig() {
     config.despSeparator ??
     config.desp_separator ??
     DEFAULT_DESP_SEPARATOR;
+  const finalWaitMs = Number.parseInt(
+    process.env.CODEX_PUSHDEER_FINAL_WAIT_MS ??
+      config.finalWaitMs ??
+      config.final_wait_ms ??
+      String(DEFAULT_FINAL_WAIT_MS),
+    10,
+  );
 
   return {
     ...config,
@@ -166,6 +174,7 @@ export function loadConfig() {
       : DEFAULT_LLM_TIMEOUT_MS,
     despMaxChars: normalizeDespMaxChars(despMaxChars),
     despSeparator: normalizeDespSeparator(despSeparator),
+    finalWaitMs: normalizeFinalWaitMs(finalWaitMs),
   };
 }
 
@@ -230,6 +239,12 @@ export function normalizeDespMaxChars(value) {
 export function normalizeDespSeparator(value) {
   if (value === false || value === null) return "";
   return String(value ?? DEFAULT_DESP_SEPARATOR).replace(/\\r/g, "\r").replace(/\\n/g, "\n");
+}
+
+export function normalizeFinalWaitMs(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_FINAL_WAIT_MS;
+  return Math.min(parsed, 60_000);
 }
 
 export function truncateDesp(finalText, maxChars = DEFAULT_DESP_MAX_CHARS) {
@@ -379,7 +394,38 @@ function newestJsonlFiles(root, limit = 8) {
     .map((item) => item.filePath);
 }
 
-function parseFinalFromSessionFile(filePath, cwd) {
+function isFinalPhase(phase) {
+  return phase === "final_answer" || phase === "final";
+}
+
+function payloadMessageText(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  return (
+    collectTextFromContent(payload.content) ||
+    payload.last_agent_message ||
+    payload.message ||
+    payload.text ||
+    payload.output ||
+    ""
+  );
+}
+
+function getTurnRecord(turns, turnId) {
+  if (!turnId) return null;
+  if (!turns.has(turnId)) {
+    turns.set(turnId, {
+      turnId,
+      cwd: "",
+      finalText: "",
+      finalTimestamp: "",
+      taskComplete: false,
+      userText: "",
+    });
+  }
+  return turns.get(turnId);
+}
+
+function parseFinalFromSessionFile(filePath, { cwd = "", turnId = "", requireTaskComplete = true } = {}) {
   let lines = [];
   try {
     lines = fs.readFileSync(filePath, "utf8").trim().split(/\n+/);
@@ -387,57 +433,111 @@ function parseFinalFromSessionFile(filePath, cwd) {
     return null;
   }
 
-  let latestCwd = "";
-  let latestTurnId = "";
-  let latestFinal = "";
-  let latestTimestamp = "";
+  const turns = new Map();
+  let activeTurnId = "";
 
   for (const line of lines) {
     const item = safeJsonParse(line);
     if (!item || typeof item !== "object") continue;
+    const payload = item.payload || {};
 
-    if (item.type === "turn_context" && item.payload) {
-      latestCwd = item.payload.cwd || latestCwd;
-      latestTurnId = item.payload.turn_id || latestTurnId;
+    if (item.type === "turn_context" && payload) {
+      activeTurnId = payload.turn_id || activeTurnId;
+      const record = getTurnRecord(turns, activeTurnId);
+      if (record) record.cwd = payload.cwd || record.cwd;
     }
 
-    if (item.type === "response_item" && item.payload) {
-      const responsePayload = item.payload;
-      const turnId = extractTurnId(responsePayload) || latestTurnId;
-      const phase = responsePayload.phase;
-      const role = responsePayload.role;
-      const text = collectTextFromContent(responsePayload.content);
-      if ((phase === "final" || role === "assistant") && text.trim()) {
-        latestFinal = text;
-        latestTurnId = turnId || latestTurnId;
-        latestTimestamp = item.timestamp || latestTimestamp;
+    const itemTurnId = extractTurnId(payload) || activeTurnId;
+    const record = getTurnRecord(turns, itemTurnId);
+    if (!record) continue;
+
+    if (item.type === "response_item" && payload.type === "message" && payload.role === "user") {
+      const text = payloadMessageText(payload);
+      if (text.trim()) record.userText = `${record.userText}\n${text}`.trim();
+    }
+
+    if (item.type === "response_item" && payload.type === "message" && payload.role === "assistant" && isFinalPhase(payload.phase)) {
+      const text = payloadMessageText(payload);
+      if (text.trim()) {
+        record.finalText = text;
+        record.finalTimestamp = item.timestamp || record.finalTimestamp;
+      }
+    }
+
+    if (item.type === "event_msg" && payload.type === "agent_message" && isFinalPhase(payload.phase)) {
+      const text = payloadMessageText(payload);
+      if (text.trim()) {
+        record.finalText = text;
+        record.finalTimestamp = item.timestamp || record.finalTimestamp;
+      }
+    }
+
+    if (item.type === "event_msg" && payload.type === "user_message") {
+      const text = payloadMessageText(payload);
+      if (text.trim()) record.userText = `${record.userText}\n${text}`.trim();
+    }
+
+    if (item.type === "event_msg" && payload.type === "task_complete") {
+      record.taskComplete = true;
+      const text = payloadMessageText(payload);
+      if (text.trim()) {
+        record.finalText = text;
+        record.finalTimestamp = item.timestamp || record.finalTimestamp;
       }
     }
   }
 
-  if (!latestFinal) return null;
-  if (cwd && latestCwd && path.resolve(cwd) !== path.resolve(latestCwd)) {
-    return null;
-  }
+  const candidates = turnId
+    ? [turns.get(turnId)].filter(Boolean)
+    : Array.from(turns.values())
+      .filter((record) => {
+        if (!record.finalText) return false;
+        if (cwd && record.cwd && path.resolve(cwd) !== path.resolve(record.cwd)) return false;
+        return true;
+      })
+      .sort((a, b) => String(b.finalTimestamp).localeCompare(String(a.finalTimestamp)));
+
+  const result = candidates[0];
+  if (!result?.finalText) return null;
+  if (requireTaskComplete && !result.taskComplete) return null;
 
   return {
-    finalText: latestFinal,
-    turnId: latestTurnId,
-    timestamp: latestTimestamp,
+    finalText: result.finalText,
+    turnId: result.turnId,
+    timestamp: result.finalTimestamp,
     sessionFile: filePath,
+    taskComplete: result.taskComplete,
+    userText: result.userText,
   };
 }
 
-export async function findLatestFinalMessage({ cwd = process.cwd(), retries = 3 } = {}) {
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
+export async function findLatestFinalMessage({
+  cwd = process.cwd(),
+  turnId = "",
+  retries = null,
+  timeoutMs = null,
+  intervalMs = 250,
+  requireTaskComplete = true,
+} = {}) {
+  const waitMs = timeoutMs == null
+    ? (retries == null ? DEFAULT_FINAL_WAIT_MS : Math.max(0, retries) * intervalMs)
+    : timeoutMs;
+  const deadline = Date.now() + Math.max(0, waitMs);
+  let attempt = 0;
+
+  while (Date.now() <= deadline || attempt === 0) {
     const files = newestJsonlFiles(getSessionRoot());
     for (const filePath of files) {
-      const result = parseFinalFromSessionFile(filePath, cwd);
+      const result = parseFinalFromSessionFile(filePath, {
+        cwd,
+        turnId,
+        requireTaskComplete,
+      });
       if (result) return result;
     }
-    if (attempt < retries) {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
+    attempt += 1;
+    if (Date.now() > deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   return null;
 }

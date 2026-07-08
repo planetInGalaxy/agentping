@@ -9,11 +9,13 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_DESP_MAX_CHARS,
   DEFAULT_DESP_SEPARATOR,
+  DEFAULT_FINAL_WAIT_MS,
   configPath as pushdeerConfigPath,
   DEFAULT_LLM_TIMEOUT_MS,
   loadConfig as loadPushdeerConfig,
   normalizeDespMaxChars,
   normalizeDespSeparator,
+  normalizeFinalWaitMs,
   saveConfigPatch,
 } from "../plugins/codex-pushdeer-notifier/scripts/pushdeer-lib.mjs";
 import { chooseSummaryModel } from "./model-utils.mjs";
@@ -312,11 +314,33 @@ function configureDespSeparator() {
   console.log(`Configured PushDeer desp separator ${JSON.stringify(despSeparator)}`);
 }
 
+function configureFinalWaitMs() {
+  const hasExplicitValue =
+    args["final-wait-ms"] !== undefined ||
+    args["final-wait"] !== undefined;
+
+  if (!hasExplicitValue) {
+    return;
+  }
+
+  const rawValue = args["final-wait-ms"] ?? args["final-wait"] ?? DEFAULT_FINAL_WAIT_MS;
+  const finalWaitMs = normalizeFinalWaitMs(rawValue);
+
+  if (args["dry-run"]) {
+    console.log(`[dry-run] write finalWaitMs=${finalWaitMs} to ${pushdeerConfigPath()}`);
+    return;
+  }
+
+  saveConfigPatch({ finalWaitMs });
+  console.log(`Configured final-answer wait ${finalWaitMs}ms`);
+}
+
 installPlugin();
 await configureNotify();
 configureSummaryModel();
 configureDespMaxChars();
 configureDespSeparator();
+configureFinalWaitMs();
 configurePushDeerKey();
 
 console.log("");

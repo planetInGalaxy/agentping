@@ -47,6 +47,8 @@ CODEX_PUSHDEER_DRY_RUN=1 node plugins/codex-pushdeer-notifier/scripts/pushdeer-n
 - Never write a PushDeer key into a repository file.
 - Prefer `~/.config/codex-pushdeer-notifier/config.json` or `PUSHDEER_KEY` for local credentials.
 - For normal Codex answers, do not send a manual notification before the final response; rely on user-level Codex `notify` so completion notifications are sent on `agent-turn-complete`.
+- Treat notify payload assistant text as untrusted: only send automatic completion notifications after the matching Codex session has a final answer and `task_complete`.
+- Suppress notifications from internal summary `codex exec` runs with `CODEX_PUSHDEER_SUPPRESS_NOTIFY=1`.
 - Do not enable the bundled Stop hook for normal use; it is kept only as an experimental fallback to avoid duplicate notifications.
 - Use manual notification commands only for setup, tests, troubleshooting, or explicit one-off user requests.
 - Automatic completion notifications send the LLM summary in PushDeer `text`, and a separator plus the original assistant answer in `desp`.

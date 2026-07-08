@@ -84,6 +84,7 @@ if (args.show) {
     llmTimeoutMs: config.llmTimeoutMs,
     despMaxChars: config.despMaxChars,
     despSeparator: config.despSeparator,
+    finalWaitMs: config.finalWaitMs,
   }, null, 2));
   process.exit(0);
 }

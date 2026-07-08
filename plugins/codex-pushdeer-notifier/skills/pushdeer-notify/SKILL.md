@@ -34,7 +34,7 @@ node scripts/check-models.mjs --write-config
 ```bash
 node scripts/config.mjs set-mode always
 node scripts/config.mjs set-mode long_only --min-duration-ms 30000
-node scripts/config.mjs set-mode manual
+node scripts/config.mjs set-mode off
 ```
 
 - Change summary or `desp` settings:
@@ -83,7 +83,7 @@ CODEX_PUSHDEER_DRY_RUN=1 node plugins/codex-pushdeer-notifier/scripts/pushdeer-n
 - Suppress notifications from internal summary `codex exec` runs with `CODEX_PUSHDEER_SUPPRESS_NOTIFY=1`.
 - Do not enable the bundled Stop hook for normal use; it is kept only as an experimental fallback to avoid duplicate notifications.
 - Default notification mode is `always`, preserving one PushDeer message after each completed Codex answer.
-- Optional notification modes are `long_only`, `errors_only`, `manual`, and `off`. Use `long_only` with `minDurationMs` when users only want notifications for longer tasks.
+- Optional notification modes are `long_only`, `errors_only`, and `off`. Use `long_only` with `minDurationMs` when users only want notifications for longer tasks.
 - Use manual notification commands only for setup, tests, troubleshooting, or explicit one-off user requests.
 - Automatic completion notifications send the LLM summary in PushDeer `text`, and a separator plus the original assistant answer in `desp`.
 - Truncate automatic `desp` with `despMaxChars`; the default and hard cap are 300 characters including the separator. Set `despMaxChars` to `0` to omit `desp`.

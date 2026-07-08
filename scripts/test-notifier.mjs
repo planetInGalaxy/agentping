@@ -12,6 +12,7 @@ import {
   formatDesp,
   logEvent,
   logPath,
+  normalizeNotifyMode,
   normalizeSummaryCharBounds,
 } from "../plugins/codex-pushdeer-notifier/scripts/pushdeer-lib.mjs";
 
@@ -185,6 +186,7 @@ function testFormatHelpers() {
   const { summaryMinChars, summaryMaxChars } = normalizeSummaryCharBounds(60, 30);
   assert.equal(summaryMinChars, 60);
   assert.equal(summaryMaxChars, 60);
+  assert.equal(normalizeNotifyMode("manual"), "off");
   const desp = formatDesp("这是一段原始回答内容，用来验证 desp 分隔符和长度限制。", {
     maxChars: 12,
     separator: "\n-----\n",

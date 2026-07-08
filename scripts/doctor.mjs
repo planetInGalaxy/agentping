@@ -19,6 +19,7 @@ import {
   loadConfig,
   redactText,
   statePath,
+  takeChars,
 } from "../plugins/codex-pushdeer-notifier/scripts/pushdeer-lib.mjs";
 import { chooseSummaryModel, codexConfigPath } from "./model-utils.mjs";
 
@@ -111,7 +112,12 @@ function logStatus() {
   const logFile = statePath("notifier.log");
   if (!fs.existsSync(logFile)) return { ok: true, detail: "no notifier log yet" };
   const lines = fs.readFileSync(logFile, "utf8").trim().split(/\n+/).slice(-3);
-  return { ok: true, detail: lines.map((line) => redactText(line)).join("\n") };
+  return {
+    ok: true,
+    detail: lines
+      .map((line) => takeChars(redactText(line), 1000))
+      .join("\n"),
+  };
 }
 
 const config = loadConfig();

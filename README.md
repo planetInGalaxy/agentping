@@ -14,7 +14,7 @@ The notifier uses Codex `notify` with the `agent-turn-complete` event. It does n
 - Asks the summary model for 30 to 60 Chinese characters by default.
 - Does not hard-truncate LLM summaries; semantic completeness is preferred if the model slightly exceeds the configured range.
 - Keeps the default `desp` at or below 300 characters.
-- Supports notification modes: always, long tasks only, errors only, manual, or off.
+- Supports notification modes: always, long tasks only, errors only, or off.
 - Rotates local notifier logs so troubleshooting data does not grow without bound.
 - Includes local self-test commands that use temporary files and dry-run PushDeer sends.
 - Stores each user's PushDeer key outside the repository.
@@ -178,7 +178,7 @@ Summary length is prompt-guided, not enforced by hard truncation. If the model r
 `CODEX_PUSHDEER_DESP_MAX_CHARS` overrides the stored `desp` truncation limit. Values above 300 are capped to 300. Set it to `0` to omit `desp`.
 `CODEX_PUSHDEER_DESP_SEPARATOR` overrides the marker placed before the original answer in `desp`; escaped `\n` sequences are converted to newlines. Set it to an empty string to omit the marker.
 `CODEX_PUSHDEER_FINAL_WAIT_MS` controls how long a notify event waits for the Codex session file to show `task_complete`. Intermediate events are skipped if no completed final answer appears within that window.
-`CODEX_PUSHDEER_NOTIFY_MODE` controls whether automatic notifications send. Valid values are `always`, `long_only`, `errors_only`, `manual`, and `off`. The default is `always`.
+`CODEX_PUSHDEER_NOTIFY_MODE` controls whether automatic notifications send. Valid values are `always`, `long_only`, `errors_only`, and `off`. The default is `always`.
 `CODEX_PUSHDEER_MIN_DURATION_MS` is used by `long_only`; turns shorter than this threshold are skipped.
 `CODEX_PUSHDEER_LOG_MAX_BYTES` and `CODEX_PUSHDEER_LOG_KEEP_FILES` control local log rotation. Set `CODEX_PUSHDEER_LOG_MAX_BYTES=0` to disable rotation.
 
@@ -195,6 +195,7 @@ codex-pushdeer config set-desp-max 300
 codex-pushdeer config set-separator "\n-----\n"
 codex-pushdeer config set-mode always
 codex-pushdeer config set-mode long_only --min-duration-ms 30000
+codex-pushdeer config set-mode off
 ```
 
 Diagnose the whole local setup:
@@ -308,5 +309,5 @@ Common failures:
 - PushDeer key missing: run `PUSHDEER_KEY='PDU...' node scripts/install.mjs`.
 - Summary model unavailable: run `npm run check-models -- --write-config` or reinstall with `--summary-model <model>`.
 - No notification after install: restart Codex or start a new Codex thread.
-- Notification arrives for tasks you do not care about: use `codex-pushdeer config set-mode long_only --min-duration-ms 30000`, `manual`, or `off`.
+- Notification arrives for tasks you do not care about: use `codex-pushdeer config set-mode long_only --min-duration-ms 30000` or `codex-pushdeer config set-mode off`.
 - Log file is too large: run `codex-pushdeer logs rotate`, `codex-pushdeer logs clear`, or reduce `logMaxBytes`.

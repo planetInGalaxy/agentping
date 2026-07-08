@@ -16,7 +16,7 @@ export const DEFAULT_NOTIFY_MODE = "always";
 export const DEFAULT_MIN_DURATION_MS = 30_000;
 export const DEFAULT_LOG_MAX_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_LOG_KEEP_FILES = 3;
-export const NOTIFY_MODES = ["always", "long_only", "errors_only", "manual", "off"];
+export const NOTIFY_MODES = ["always", "long_only", "errors_only", "off"];
 
 export function expandHome(value) {
   if (!value) return value;
@@ -323,6 +323,7 @@ export function normalizeFinalWaitMs(value) {
 
 export function normalizeNotifyMode(value) {
   const mode = String(value || DEFAULT_NOTIFY_MODE).trim().toLowerCase();
+  if (mode === "manual") return "off";
   return NOTIFY_MODES.includes(mode) ? mode : DEFAULT_NOTIFY_MODE;
 }
 

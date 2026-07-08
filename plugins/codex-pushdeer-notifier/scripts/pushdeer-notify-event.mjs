@@ -18,6 +18,7 @@ import {
   safeJsonParse,
   sendPushDeer,
   summarizeFinalText,
+  takeChars,
   wasAlreadySent,
 } from "./pushdeer-lib.mjs";
 
@@ -128,7 +129,7 @@ function summarizeWithCodex({ finalText, notification }) {
         model,
         status: result.status,
         signal: result.signal,
-        stderr: result.stderr,
+        stderr: takeChars(result.stderr, 1000),
       });
       return "";
     }
@@ -162,7 +163,7 @@ function summarizeWithCodex({ finalText, notification }) {
 
 function notificationModeDecision(config, sessionFinal) {
   const mode = config.notifyMode || "always";
-  if (mode === "off" || mode === "manual") {
+  if (mode === "off") {
     return {
       send: false,
       reason: `notify mode ${mode}`,

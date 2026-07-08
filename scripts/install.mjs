@@ -10,6 +10,10 @@ import {
   DEFAULT_DESP_MAX_CHARS,
   DEFAULT_DESP_SEPARATOR,
   DEFAULT_FINAL_WAIT_MS,
+  DEFAULT_LOG_KEEP_FILES,
+  DEFAULT_LOG_MAX_BYTES,
+  DEFAULT_MIN_DURATION_MS,
+  DEFAULT_NOTIFY_MODE,
   DEFAULT_SUMMARY_MAX_CHARS,
   DEFAULT_SUMMARY_MIN_CHARS,
   configPath as pushdeerConfigPath,
@@ -18,6 +22,10 @@ import {
   normalizeDespMaxChars,
   normalizeDespSeparator,
   normalizeFinalWaitMs,
+  normalizeLogKeepFiles,
+  normalizeLogMaxBytes,
+  normalizeMinDurationMs,
+  normalizeNotifyMode,
   normalizeSummaryCharBounds,
   saveConfigPatch,
 } from "../plugins/codex-pushdeer-notifier/scripts/pushdeer-lib.mjs";
@@ -373,6 +381,71 @@ function configureFinalWaitMs() {
   console.log(`Configured final-answer wait ${finalWaitMs}ms`);
 }
 
+function configureNotificationMode() {
+  const hasExplicitValue =
+    args["notify-mode"] !== undefined ||
+    args["min-duration-ms"] !== undefined ||
+    args["min-duration"] !== undefined;
+
+  if (!hasExplicitValue) {
+    return;
+  }
+
+  const current = loadPushdeerConfig();
+  const rawMode = args["notify-mode"] ?? current.notifyMode ?? DEFAULT_NOTIFY_MODE;
+  const notifyMode = normalizeNotifyMode(rawMode);
+  const minDurationMs = normalizeMinDurationMs(
+    args["min-duration-ms"] ??
+      args["min-duration"] ??
+      current.minDurationMs ??
+      DEFAULT_MIN_DURATION_MS,
+  );
+
+  if (args["dry-run"]) {
+    console.log(`[dry-run] write notifyMode=${notifyMode}, minDurationMs=${minDurationMs} to ${pushdeerConfigPath()}`);
+    return;
+  }
+
+  saveConfigPatch({
+    notifyMode,
+    minDurationMs,
+  });
+  console.log(`Configured notification mode ${notifyMode} (${minDurationMs}ms long_only threshold)`);
+}
+
+function configureLogSettings() {
+  const hasExplicitValue =
+    args["log-max-bytes"] !== undefined ||
+    args["log-keep-files"] !== undefined;
+
+  if (!hasExplicitValue) {
+    return;
+  }
+
+  const current = loadPushdeerConfig();
+  const logMaxBytes = normalizeLogMaxBytes(
+    args["log-max-bytes"] ??
+      current.logMaxBytes ??
+      DEFAULT_LOG_MAX_BYTES,
+  );
+  const logKeepFiles = normalizeLogKeepFiles(
+    args["log-keep-files"] ??
+      current.logKeepFiles ??
+      DEFAULT_LOG_KEEP_FILES,
+  );
+
+  if (args["dry-run"]) {
+    console.log(`[dry-run] write logMaxBytes=${logMaxBytes}, logKeepFiles=${logKeepFiles} to ${pushdeerConfigPath()}`);
+    return;
+  }
+
+  saveConfigPatch({
+    logMaxBytes,
+    logKeepFiles,
+  });
+  console.log(`Configured notifier log rotation ${logMaxBytes} bytes, keep ${logKeepFiles} files`);
+}
+
 installPlugin();
 await configureNotify();
 configureSummaryModel();
@@ -380,6 +453,8 @@ configureSummaryCharBounds();
 configureDespMaxChars();
 configureDespSeparator();
 configureFinalWaitMs();
+configureNotificationMode();
+configureLogSettings();
 configurePushDeerKey();
 
 console.log("");

@@ -14,7 +14,7 @@ Resolve command paths relative to this plugin directory. Do not hard-code a deve
 - Show config status:
 
 ```bash
-node plugins/codex-pushdeer-notifier/scripts/setup-pushdeer-key.mjs --show
+node scripts/config.mjs show
 ```
 
 - Diagnose local setup:
@@ -27,6 +27,38 @@ node scripts/doctor.mjs
 
 ```bash
 node scripts/check-models.mjs --write-config
+```
+
+- Change notification strategy:
+
+```bash
+node scripts/config.mjs set-mode always
+node scripts/config.mjs set-mode long_only --min-duration-ms 30000
+node scripts/config.mjs set-mode manual
+```
+
+- Change summary or `desp` settings:
+
+```bash
+node scripts/config.mjs set-summary-range 30 60
+node scripts/config.mjs set-timeout 15000
+node scripts/config.mjs set-desp-max 300
+node scripts/config.mjs set-separator "\n-----\n"
+```
+
+- Inspect notifier logs:
+
+```bash
+node scripts/logs.mjs status
+node scripts/logs.mjs tail 20
+node scripts/logs.mjs rotate
+node scripts/logs.mjs clear
+```
+
+- Run local self-tests:
+
+```bash
+node scripts/test-notifier.mjs all
 ```
 
 - Save a PushDeer key from stdin:
@@ -50,12 +82,16 @@ CODEX_PUSHDEER_DRY_RUN=1 node plugins/codex-pushdeer-notifier/scripts/pushdeer-n
 - Treat notify payload assistant text as untrusted: only send automatic completion notifications after the matching Codex session has a final answer and `task_complete`.
 - Suppress notifications from internal summary `codex exec` runs with `CODEX_PUSHDEER_SUPPRESS_NOTIFY=1`.
 - Do not enable the bundled Stop hook for normal use; it is kept only as an experimental fallback to avoid duplicate notifications.
+- Default notification mode is `always`, preserving one PushDeer message after each completed Codex answer.
+- Optional notification modes are `long_only`, `errors_only`, `manual`, and `off`. Use `long_only` with `minDurationMs` when users only want notifications for longer tasks.
 - Use manual notification commands only for setup, tests, troubleshooting, or explicit one-off user requests.
 - Automatic completion notifications send the LLM summary in PushDeer `text`, and a separator plus the original assistant answer in `desp`.
 - Truncate automatic `desp` with `despMaxChars`; the default and hard cap are 300 characters including the separator. Set `despMaxChars` to `0` to omit `desp`.
 - Use `despSeparator` to distinguish the summary from original content when PushDeer clients display `text` and `desp` together. The default is `\n-----\n`.
 - Prompt automatic summaries toward the configured `summaryMinChars` to `summaryMaxChars` range; defaults are 30 to 60 Chinese characters.
 - Do not hard-truncate LLM summaries. If a generated summary exceeds the configured range, send it as-is so it remains understandable.
+- Notifier logs rotate according to `logMaxBytes` and `logKeepFiles`. Use `scripts/logs.mjs` instead of manually editing state files.
+- Self-tests must use temporary files and remove them after completion; do not add persistent test fixtures unless the user asks for them.
 - Prefer `scripts/doctor.mjs` before editing source when a user's machine behaves differently.
 - Prefer `scripts/check-models.mjs --write-config` over hard-coding model names in source.
 - Do not include secrets, long logs, full stack traces, or complete command output in notifications.

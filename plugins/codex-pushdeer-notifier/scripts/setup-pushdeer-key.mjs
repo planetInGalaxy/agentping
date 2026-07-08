@@ -87,6 +87,10 @@ if (args.show) {
     despMaxChars: config.despMaxChars,
     despSeparator: config.despSeparator,
     finalWaitMs: config.finalWaitMs,
+    notifyMode: config.notifyMode,
+    minDurationMs: config.minDurationMs,
+    logMaxBytes: config.logMaxBytes,
+    logKeepFiles: config.logKeepFiles,
   }, null, 2));
   process.exit(0);
 }

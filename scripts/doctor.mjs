@@ -8,8 +8,13 @@ import {
   DEFAULT_DESP_MAX_CHARS,
   DEFAULT_DESP_SEPARATOR,
   DEFAULT_FINAL_WAIT_MS,
+  DEFAULT_LOG_KEEP_FILES,
+  DEFAULT_LOG_MAX_BYTES,
+  DEFAULT_MIN_DURATION_MS,
+  DEFAULT_NOTIFY_MODE,
   DEFAULT_SUMMARY_MAX_CHARS,
   DEFAULT_SUMMARY_MIN_CHARS,
+  NOTIFY_MODES,
   configPath as pushdeerConfigPath,
   loadConfig,
   redactText,
@@ -142,6 +147,18 @@ const checks = {
   finalWaitMs: {
     ok: config.finalWaitMs >= 0 && config.finalWaitMs <= 60_000,
     detail: `${config.finalWaitMs}ms, default ${DEFAULT_FINAL_WAIT_MS}ms`,
+  },
+  notifyMode: {
+    ok: NOTIFY_MODES.includes(config.notifyMode),
+    detail: `${config.notifyMode}, default ${DEFAULT_NOTIFY_MODE}`,
+  },
+  minDurationMs: {
+    ok: config.minDurationMs >= 0,
+    detail: `${config.minDurationMs}ms, default ${DEFAULT_MIN_DURATION_MS}ms`,
+  },
+  logRotation: {
+    ok: config.logMaxBytes >= 0 && config.logKeepFiles >= 0,
+    detail: `${config.logMaxBytes} bytes, keep ${config.logKeepFiles}; default ${DEFAULT_LOG_MAX_BYTES} bytes, keep ${DEFAULT_LOG_KEEP_FILES}`,
   },
   notifierLog: logStatus(),
 };

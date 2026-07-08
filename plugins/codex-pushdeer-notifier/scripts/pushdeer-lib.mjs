@@ -12,6 +12,11 @@ export const DEFAULT_LLM_TIMEOUT_MS = 12_000;
 export const DEFAULT_DESP_MAX_CHARS = 300;
 export const DEFAULT_DESP_SEPARATOR = "\n-----\n";
 export const DEFAULT_FINAL_WAIT_MS = 8_000;
+export const DEFAULT_NOTIFY_MODE = "always";
+export const DEFAULT_MIN_DURATION_MS = 30_000;
+export const DEFAULT_LOG_MAX_BYTES = 2 * 1024 * 1024;
+export const DEFAULT_LOG_KEEP_FILES = 3;
+export const NOTIFY_MODES = ["always", "long_only", "errors_only", "manual", "off"];
 
 export function expandHome(value) {
   if (!value) return value;
@@ -65,6 +70,7 @@ export function writeJson0600(filePath, value) {
 export function logEvent(level, message, meta = {}) {
   try {
     ensureDir(stateDir());
+    rotateLogIfNeeded();
     const line = JSON.stringify({
       ts: new Date().toISOString(),
       level,
@@ -179,6 +185,32 @@ export function loadConfig() {
       String(DEFAULT_FINAL_WAIT_MS),
     10,
   );
+  const notifyMode =
+    process.env.CODEX_PUSHDEER_NOTIFY_MODE ??
+    config.notifyMode ??
+    config.notify_mode ??
+    DEFAULT_NOTIFY_MODE;
+  const minDurationMs = Number.parseInt(
+    process.env.CODEX_PUSHDEER_MIN_DURATION_MS ??
+      config.minDurationMs ??
+      config.min_duration_ms ??
+      String(DEFAULT_MIN_DURATION_MS),
+    10,
+  );
+  const logMaxBytes = Number.parseInt(
+    process.env.CODEX_PUSHDEER_LOG_MAX_BYTES ??
+      config.logMaxBytes ??
+      config.log_max_bytes ??
+      String(DEFAULT_LOG_MAX_BYTES),
+    10,
+  );
+  const logKeepFiles = Number.parseInt(
+    process.env.CODEX_PUSHDEER_LOG_KEEP_FILES ??
+      config.logKeepFiles ??
+      config.log_keep_files ??
+      String(DEFAULT_LOG_KEEP_FILES),
+    10,
+  );
   const summaryBounds = normalizeSummaryCharBounds(summaryMinChars, summaryMaxChars);
 
   return {
@@ -193,6 +225,10 @@ export function loadConfig() {
     despMaxChars: normalizeDespMaxChars(despMaxChars),
     despSeparator: normalizeDespSeparator(despSeparator),
     finalWaitMs: normalizeFinalWaitMs(finalWaitMs),
+    notifyMode: normalizeNotifyMode(notifyMode),
+    minDurationMs: normalizeMinDurationMs(minDurationMs),
+    logMaxBytes: normalizeLogMaxBytes(logMaxBytes),
+    logKeepFiles: normalizeLogKeepFiles(logKeepFiles),
   };
 }
 
@@ -283,6 +319,85 @@ export function normalizeFinalWaitMs(value) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_FINAL_WAIT_MS;
   return Math.min(parsed, 60_000);
+}
+
+export function normalizeNotifyMode(value) {
+  const mode = String(value || DEFAULT_NOTIFY_MODE).trim().toLowerCase();
+  return NOTIFY_MODES.includes(mode) ? mode : DEFAULT_NOTIFY_MODE;
+}
+
+export function normalizeMinDurationMs(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_MIN_DURATION_MS;
+  return Math.min(parsed, 24 * 60 * 60 * 1000);
+}
+
+export function normalizeLogMaxBytes(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_LOG_MAX_BYTES;
+  return Math.min(parsed, 100 * 1024 * 1024);
+}
+
+export function normalizeLogKeepFiles(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_LOG_KEEP_FILES;
+  return Math.min(parsed, 20);
+}
+
+function logSettings() {
+  const config = readJsonIfExists(configPath(), {});
+  return {
+    logMaxBytes: normalizeLogMaxBytes(
+      process.env.CODEX_PUSHDEER_LOG_MAX_BYTES ??
+        config.logMaxBytes ??
+        config.log_max_bytes ??
+        DEFAULT_LOG_MAX_BYTES,
+    ),
+    logKeepFiles: normalizeLogKeepFiles(
+      process.env.CODEX_PUSHDEER_LOG_KEEP_FILES ??
+        config.logKeepFiles ??
+        config.log_keep_files ??
+        DEFAULT_LOG_KEEP_FILES,
+    ),
+  };
+}
+
+export function logPath(index = 0) {
+  const base = statePath("notifier.log");
+  return index > 0 ? `${base}.${index}` : base;
+}
+
+export function rotateLogIfNeeded({ force = false } = {}) {
+  const { logMaxBytes, logKeepFiles } = logSettings();
+  const base = logPath();
+  if (logMaxBytes <= 0 || logKeepFiles <= 0) return false;
+  try {
+    const stat = fs.statSync(base);
+    if (!force && stat.size < logMaxBytes) return false;
+  } catch {
+    return false;
+  }
+
+  for (let index = logKeepFiles; index >= 1; index -= 1) {
+    const from = logPath(index);
+    const to = logPath(index + 1);
+    try {
+      if (index === logKeepFiles) {
+        fs.rmSync(from, { force: true });
+      } else if (fs.existsSync(from)) {
+        fs.renameSync(from, to);
+      }
+    } catch {
+      // Ignore rotation races; logging must remain best-effort.
+    }
+  }
+
+  try {
+    fs.renameSync(base, logPath(1));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function truncateDesp(finalText, maxChars = DEFAULT_DESP_MAX_CHARS) {
@@ -476,6 +591,10 @@ function getTurnRecord(turns, turnId) {
       cwd: "",
       finalText: "",
       finalTimestamp: "",
+      startedTimestamp: "",
+      terminalTimestamp: "",
+      terminalType: "",
+      durationMs: null,
       taskComplete: false,
       userText: "",
     });
@@ -509,6 +628,10 @@ function parseFinalFromSessionFile(filePath, { cwd = "", turnId = "", requireTas
     const record = getTurnRecord(turns, itemTurnId);
     if (!record) continue;
 
+    if (item.type === "event_msg" && payload.type === "task_started") {
+      record.startedTimestamp = item.timestamp || record.startedTimestamp;
+    }
+
     if (item.type === "response_item" && payload.type === "message" && payload.role === "user") {
       const text = payloadMessageText(payload);
       if (text.trim()) record.userText = `${record.userText}\n${text}`.trim();
@@ -537,6 +660,18 @@ function parseFinalFromSessionFile(filePath, { cwd = "", turnId = "", requireTas
 
     if (item.type === "event_msg" && payload.type === "task_complete") {
       record.taskComplete = true;
+      record.terminalType = payload.type;
+      record.terminalTimestamp = item.timestamp || record.terminalTimestamp;
+      const text = payloadMessageText(payload);
+      if (text.trim()) {
+        record.finalText = text;
+        record.finalTimestamp = item.timestamp || record.finalTimestamp;
+      }
+    }
+
+    if (item.type === "event_msg" && ["task_failed", "task_cancelled", "task_interrupted"].includes(payload.type)) {
+      record.terminalType = payload.type;
+      record.terminalTimestamp = item.timestamp || record.terminalTimestamp;
       const text = payloadMessageText(payload);
       if (text.trim()) {
         record.finalText = text;
@@ -565,8 +700,19 @@ function parseFinalFromSessionFile(filePath, { cwd = "", turnId = "", requireTas
     timestamp: result.finalTimestamp,
     sessionFile: filePath,
     taskComplete: result.taskComplete,
+    terminalType: result.terminalType,
+    startedTimestamp: result.startedTimestamp,
+    terminalTimestamp: result.terminalTimestamp,
+    durationMs: calculateDurationMs(result.startedTimestamp, result.terminalTimestamp),
     userText: result.userText,
   };
+}
+
+function calculateDurationMs(startedTimestamp, terminalTimestamp) {
+  const start = Date.parse(startedTimestamp || "");
+  const end = Date.parse(terminalTimestamp || "");
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+  return end - start;
 }
 
 export async function findLatestFinalMessage({

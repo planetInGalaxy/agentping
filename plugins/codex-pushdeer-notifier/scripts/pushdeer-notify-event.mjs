@@ -21,7 +21,10 @@ import {
   wasAlreadySent,
 } from "./pushdeer-lib.mjs";
 
-const SUMMARY_PROMPT_MARKER = "你是推送通知摘要器";
+const SUMMARY_PROMPT_MARKERS = [
+  "你是推送通知摘要器",
+  "你是 Codex 完成通知摘要器",
+];
 
 function loadNotificationArg() {
   const raw = process.argv[2] || "";
@@ -53,7 +56,11 @@ function inputMessagesText(notification) {
 function isInternalSummaryNotification(notification) {
   if (process.env.CODEX_PUSHDEER_SUPPRESS_NOTIFY === "1") return true;
   const inputText = inputMessagesText(notification);
-  return inputText.includes(SUMMARY_PROMPT_MARKER);
+  return SUMMARY_PROMPT_MARKERS.some((marker) => inputText.includes(marker));
+}
+
+function isInternalSummaryText(text) {
+  return SUMMARY_PROMPT_MARKERS.some((marker) => String(text || "").includes(marker));
 }
 
 function summarizeWithCodex({ finalText, notification }) {
@@ -69,9 +76,11 @@ function summarizeWithCodex({ finalText, notification }) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-pushdeer-summary-"));
   const outputFile = path.join(tempDir, "summary.txt");
   const prompt = [
-    "你是推送通知摘要器。根据用户问题和助手完整回答，生成一条中文推送描述。",
+    "你是 Codex 完成通知摘要器。根据用户问题和助手最终回答，生成一条中文推送摘要。",
     `期望长度：${summaryMinChars}到${summaryMaxChars}个汉字。`,
-    "要求：只输出摘要正文，不要标题、引号、编号或解释；必须概括完整回答的结果，不要截取开头；输出必须是语义完整的一句话，不要以半句话、顿号、连接词或省略号结尾；如果无法同时满足长度和完整性，以完整性优先，宁可略超也不要截断；不要输出密钥、token或完整长路径。",
+    "写法：用一句完整的话概括本轮最终结果，优先包含结论、已完成事项、是否修改代码/配置、是否需要用户继续行动。",
+    "不要描述过程，不要说“我查看了/我会/正在”，除非过程本身就是最终结果；不要截取开头；不要输出标题、引号、编号、解释、密钥、token、完整长路径或长 URL。",
+    "完整性优先：不要以半句话、顿号、连接词或省略号结尾；如果长度和完整性冲突，宁可略超也不要截断。",
   ].join("\n");
   const input = [
     "用户问题：",
@@ -151,6 +160,42 @@ function summarizeWithCodex({ finalText, notification }) {
   }
 }
 
+function notificationModeDecision(config, sessionFinal) {
+  const mode = config.notifyMode || "always";
+  if (mode === "off" || mode === "manual") {
+    return {
+      send: false,
+      reason: `notify mode ${mode}`,
+    };
+  }
+
+  if (mode === "long_only") {
+    const durationMs = Number.isFinite(sessionFinal.durationMs) ? sessionFinal.durationMs : null;
+    if (durationMs === null || durationMs < config.minDurationMs) {
+      return {
+        send: false,
+        reason: "duration below threshold",
+        durationMs,
+      };
+    }
+  }
+
+  if (mode === "errors_only") {
+    const terminalType = sessionFinal.terminalType || "";
+    if (!terminalType || terminalType === "task_complete") {
+      return {
+        send: false,
+        reason: "normal completion in errors_only mode",
+      };
+    }
+  }
+
+  return {
+    send: true,
+    reason: "matched notification mode",
+  };
+}
+
 async function main() {
   const notification = loadNotificationArg();
   if (notification.type !== "agent-turn-complete") {
@@ -172,7 +217,7 @@ async function main() {
     cwd: process.cwd(),
     turnId,
     timeoutMs: config.finalWaitMs,
-    requireTaskComplete: true,
+    requireTaskComplete: config.notifyMode !== "errors_only",
   });
 
   if (!sessionFinal?.finalText) {
@@ -183,9 +228,22 @@ async function main() {
     return;
   }
 
-  if (sessionFinal.userText?.includes(SUMMARY_PROMPT_MARKER)) {
+  if (isInternalSummaryText(sessionFinal.userText)) {
     logEvent("info", "Skipping internal PushDeer summary session", {
       turnId: sessionFinal.turnId || turnId,
+    });
+    return;
+  }
+
+  const modeDecision = notificationModeDecision(config, sessionFinal);
+  if (!modeDecision.send) {
+    logEvent("info", "Skipping PushDeer notify event by mode", {
+      turnId: sessionFinal.turnId || turnId,
+      notifyMode: config.notifyMode,
+      minDurationMs: config.minDurationMs,
+      terminalType: sessionFinal.terminalType,
+      durationMs: sessionFinal.durationMs,
+      reason: modeDecision.reason,
     });
     return;
   }
@@ -220,6 +278,9 @@ async function main() {
     despChars: charLength(pushDesp),
     despMaxChars: config.despMaxChars,
     finalWaitMs: config.finalWaitMs,
+    notifyMode: config.notifyMode,
+    terminalType: sessionFinal.terminalType,
+    durationMs: sessionFinal.durationMs,
     summarySource: llmDescription ? "llm" : "fallback",
     summaryModel: config.summaryModel || DEFAULT_SUMMARY_MODEL,
   });

@@ -3,11 +3,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const DEFAULT_SUMMARY_MODEL = "gpt-5.4-mini";
-export const DEFAULT_LLM_TIMEOUT_MS = 12_000;
+export const DEFAULT_SUMMARY_MODEL = "gpt-5.6-terra";
+export const DEFAULT_LLM_TIMEOUT_MS = 30_000;
 export const SUMMARY_MODEL_CANDIDATES = [
   DEFAULT_SUMMARY_MODEL,
+  "gpt-5.6-sol",
   "gpt-5.5",
+  "gpt-5.6-luna",
+  "gpt-5.4-mini",
   "gpt-5.4",
 ];
 

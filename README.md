@@ -33,7 +33,7 @@ AgentPing uses Codex `notify` with the `agent-turn-complete` event. It does not 
 The installer detects available Codex models with `codex debug models` and stores the selected summary model in local config. If you want to force a model, pass it during install:
 
 ```bash
-node scripts/install.mjs --summary-model gpt-5.5
+node scripts/install.mjs --summary-model gpt-5.6-terra
 ```
 
 ## Install
@@ -75,7 +75,7 @@ node scripts/install.mjs --dry-run --skip-key
 Useful install flags:
 
 ```bash
-node scripts/install.mjs --summary-model gpt-5.5
+node scripts/install.mjs --summary-model gpt-5.6-terra
 node scripts/install.mjs --summary-min-chars 30 --summary-max-chars 60
 node scripts/install.mjs --llm-timeout-ms 15000
 node scripts/install.mjs --desp-max-chars 300
@@ -145,10 +145,10 @@ The notifier config stores local runtime settings:
 {
   "pushkey": "PDU...",
   "endpoint": "https://api2.pushdeer.com/message/push",
-  "summaryModel": "gpt-5.4-mini",
+  "summaryModel": "gpt-5.6-terra",
   "summaryMinChars": 30,
   "summaryMaxChars": 60,
-  "llmTimeoutMs": 12000,
+  "llmTimeoutMs": 30000,
   "despMaxChars": 300,
   "despSeparator": "\n-----\n",
   "finalWaitMs": 8000,
@@ -164,10 +164,10 @@ The notifier config stores local runtime settings:
 Optional environment variables:
 
 ```bash
-export AGENTPING_SUMMARY_MODEL=gpt-5.4-mini
+export AGENTPING_SUMMARY_MODEL=gpt-5.6-terra
 export AGENTPING_SUMMARY_MIN_CHARS=30
 export AGENTPING_SUMMARY_MAX_CHARS=60
-export AGENTPING_LLM_TIMEOUT_MS=12000
+export AGENTPING_LLM_TIMEOUT_MS=30000
 export AGENTPING_DESP_MAX_CHARS=300
 export AGENTPING_DESP_SEPARATOR='\n-----\n'
 export AGENTPING_FINAL_WAIT_MS=8000

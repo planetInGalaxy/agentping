@@ -36,6 +36,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 const args = parseArgs();
 const current = loadConfig();
 const preferredModel = args.model ||
+  args["summary-model"] ||
   current.summaryModel ||
   process.env.AGENTPING_SUMMARY_MODEL ||
   process.env.CODEX_PUSHDEER_SUMMARY_MODEL ||

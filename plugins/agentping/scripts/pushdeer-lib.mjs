@@ -9,8 +9,10 @@ export const LEGACY_APP_NAME = "codex-pushdeer-notifier";
 export const DEFAULT_SUMMARY_MODEL = "gpt-5.6-terra";
 export const DEFAULT_SUMMARY_MIN_CHARS = 30;
 export const DEFAULT_SUMMARY_MAX_CHARS = 60;
+export const DEFAULT_SUMMARY_INPUT_MAX_CHARS = 6000;
 export const DEFAULT_LLM_TIMEOUT_MS = 16_000;
 export const DEFAULT_DESP_MAX_CHARS = 300;
+export const MAX_DESP_MAX_CHARS = 1000;
 export const DEFAULT_DESP_SEPARATOR = "\n-----\n";
 export const DEFAULT_FINAL_WAIT_MS = 8_000;
 export const DEFAULT_NOTIFY_MODE = "always";
@@ -20,6 +22,9 @@ export const DEFAULT_LOG_KEEP_FILES = 3;
 export const DEFAULT_DEBUG_LOGS = false;
 export const DEFAULT_TITLE_TEMPLATE = "{summary}";
 export const DEFAULT_DESP_TEMPLATE = "{separator}{finalText}";
+export const DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS = 150;
+export const DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS = 50;
+export const DEFAULT_FINAL_TEXT_PREVIEW_MARKER = "\n......\n";
 export const NOTIFY_MODES = ["always", "long_only", "errors_only", "off"];
 export const PROJECT_CONFIG_FILES = [".agentping.json", "agentping.config.json"];
 
@@ -237,6 +242,13 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
       String(DEFAULT_SUMMARY_MAX_CHARS),
     10,
   );
+  const summaryInputMaxChars = Number.parseInt(
+    envValue("AGENTPING_SUMMARY_INPUT_MAX_CHARS", "CODEX_PUSHDEER_SUMMARY_INPUT_MAX_CHARS") ??
+      config.summaryInputMaxChars ??
+      config.summary_input_max_chars ??
+      String(DEFAULT_SUMMARY_INPUT_MAX_CHARS),
+    10,
+  );
   const llmTimeoutMs = Number.parseInt(
     envValue("AGENTPING_LLM_TIMEOUT_MS", "CODEX_PUSHDEER_LLM_TIMEOUT_MS") ||
       config.llmTimeoutMs ||
@@ -303,6 +315,25 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     config.despTemplate ??
     config.desp_template ??
     DEFAULT_DESP_TEMPLATE;
+  const finalTextPreviewHeadChars = Number.parseInt(
+    envValue("AGENTPING_FINAL_TEXT_PREVIEW_HEAD_CHARS", "CODEX_PUSHDEER_FINAL_TEXT_PREVIEW_HEAD_CHARS") ??
+      config.finalTextPreviewHeadChars ??
+      config.final_text_preview_head_chars ??
+      String(DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS),
+    10,
+  );
+  const finalTextPreviewTailChars = Number.parseInt(
+    envValue("AGENTPING_FINAL_TEXT_PREVIEW_TAIL_CHARS", "CODEX_PUSHDEER_FINAL_TEXT_PREVIEW_TAIL_CHARS") ??
+      config.finalTextPreviewTailChars ??
+      config.final_text_preview_tail_chars ??
+      String(DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS),
+    10,
+  );
+  const finalTextPreviewMarker =
+    envValue("AGENTPING_FINAL_TEXT_PREVIEW_MARKER", "CODEX_PUSHDEER_FINAL_TEXT_PREVIEW_MARKER") ??
+    config.finalTextPreviewMarker ??
+    config.final_text_preview_marker ??
+    DEFAULT_FINAL_TEXT_PREVIEW_MARKER;
   const summaryBounds = normalizeSummaryCharBounds(summaryMinChars, summaryMaxChars);
 
   return {
@@ -312,6 +343,7 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     pushkey,
     summaryModel,
     ...summaryBounds,
+    summaryInputMaxChars: normalizeSummaryInputMaxChars(summaryInputMaxChars),
     llmTimeoutMs: Number.isFinite(llmTimeoutMs) && llmTimeoutMs > 0
       ? llmTimeoutMs
       : DEFAULT_LLM_TIMEOUT_MS,
@@ -325,6 +357,9 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     debugLogs: normalizeBoolean(debugLogs, DEFAULT_DEBUG_LOGS),
     titleTemplate: normalizeTemplate(titleTemplate, DEFAULT_TITLE_TEMPLATE),
     despTemplate: normalizeTemplate(despTemplate, DEFAULT_DESP_TEMPLATE),
+    finalTextPreviewHeadChars: normalizePreviewChars(finalTextPreviewHeadChars, DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS),
+    finalTextPreviewTailChars: normalizePreviewChars(finalTextPreviewTailChars, DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS),
+    finalTextPreviewMarker: normalizeDespSeparator(finalTextPreviewMarker),
   };
 }
 
@@ -399,11 +434,18 @@ export function normalizeSummaryCharBounds(minValue, maxValue) {
   };
 }
 
+export function normalizeSummaryInputMaxChars(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_SUMMARY_INPUT_MAX_CHARS;
+  if (parsed <= 0) return 0;
+  return Math.min(parsed, 100_000);
+}
+
 export function normalizeDespMaxChars(value) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return DEFAULT_DESP_MAX_CHARS;
   if (parsed < 0) return 0;
-  return Math.min(parsed, DEFAULT_DESP_MAX_CHARS);
+  return Math.min(parsed, MAX_DESP_MAX_CHARS);
 }
 
 export function normalizeDespSeparator(value) {
@@ -454,6 +496,12 @@ export function normalizeBoolean(value, fallback = false) {
 export function normalizeTemplate(value, fallback) {
   const template = String(value ?? "");
   return template ? template : fallback;
+}
+
+export function normalizePreviewChars(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.min(parsed, 2000);
 }
 
 function logSettings() {
@@ -570,9 +618,56 @@ function formatDurationMs(value) {
   return `${Math.round(parsed / 100) / 10}s`;
 }
 
+function formatDurationZh(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return "";
+  const totalSeconds = Math.max(0, Math.round(parsed / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}分 ${seconds}秒`;
+}
+
+export function formatFinalTextPreview(finalText, {
+  headChars = DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS,
+  tailChars = DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS,
+  marker = DEFAULT_FINAL_TEXT_PREVIEW_MARKER,
+} = {}) {
+  const text = String(finalText || "");
+  if (!text) return "";
+  const chars = Array.from(text);
+  const normalizedHead = normalizePreviewChars(headChars, DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS);
+  const normalizedTail = normalizePreviewChars(tailChars, DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS);
+  if (chars.length <= normalizedHead + normalizedTail) return text;
+  return [
+    chars.slice(0, normalizedHead).join(""),
+    normalizeDespSeparator(marker),
+    chars.slice(Math.max(0, chars.length - normalizedTail)).join(""),
+  ].join("");
+}
+
+export function formatMiddlePreview(text, maxChars, marker = DEFAULT_FINAL_TEXT_PREVIEW_MARKER) {
+  const value = String(text || "");
+  const normalizedMax = normalizeSummaryInputMaxChars(maxChars);
+  if (!value || normalizedMax <= 0) return value;
+  const chars = Array.from(value);
+  if (chars.length <= normalizedMax) return value;
+  const normalizedMarker = normalizeDespSeparator(marker);
+  const markerChars = charLength(normalizedMarker);
+  if (normalizedMax <= markerChars) return takeChars(value, normalizedMax);
+  const remaining = normalizedMax - markerChars;
+  const headChars = Math.ceil(remaining * 0.7);
+  const tailChars = remaining - headChars;
+  return [
+    chars.slice(0, headChars).join(""),
+    normalizedMarker,
+    chars.slice(Math.max(0, chars.length - tailChars)).join(""),
+  ].join("");
+}
+
 export function renderTemplate(template, context = {}) {
   return String(template || "").replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (match, name) => {
     if (name === "duration") return formatDurationMs(context.durationMs);
+    if (name === "durationZh") return formatDurationZh(context.durationMs);
     if (!Object.prototype.hasOwnProperty.call(context, name)) return match;
     return String(context[name] ?? "");
   });
@@ -594,10 +689,18 @@ export function formatNotificationFields({
     despSeparator: normalizeDespSeparator(config.despSeparator),
     titleTemplate: normalizeTemplate(config.titleTemplate, DEFAULT_TITLE_TEMPLATE),
     despTemplate: normalizeTemplate(config.despTemplate, DEFAULT_DESP_TEMPLATE),
+    finalTextPreviewHeadChars: normalizePreviewChars(config.finalTextPreviewHeadChars, DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS),
+    finalTextPreviewTailChars: normalizePreviewChars(config.finalTextPreviewTailChars, DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS),
+    finalTextPreviewMarker: normalizeDespSeparator(config.finalTextPreviewMarker ?? DEFAULT_FINAL_TEXT_PREVIEW_MARKER),
   };
   const context = {
     summary,
     finalText,
+    finalTextPreview: formatFinalTextPreview(finalText, {
+      headChars: normalizedConfig.finalTextPreviewHeadChars,
+      tailChars: normalizedConfig.finalTextPreviewTailChars,
+      marker: normalizedConfig.finalTextPreviewMarker,
+    }),
     separator: normalizedConfig.despSeparator,
     turnId,
     terminalType,

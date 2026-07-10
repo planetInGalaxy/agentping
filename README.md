@@ -159,6 +159,7 @@ The notifier config stores local runtime settings:
   "summaryModel": "gpt-5.6-terra",
   "summaryMinChars": 30,
   "summaryMaxChars": 60,
+  "summaryInputMaxChars": 6000,
   "llmTimeoutMs": 16000,
   "despMaxChars": 300,
   "despSeparator": "\n-----\n",
@@ -169,7 +170,10 @@ The notifier config stores local runtime settings:
   "logKeepFiles": 3,
   "debugLogs": false,
   "titleTemplate": "{summary}",
-  "despTemplate": "{separator}{finalText}"
+  "despTemplate": "{separator}{finalText}",
+  "finalTextPreviewHeadChars": 150,
+  "finalTextPreviewTailChars": 50,
+  "finalTextPreviewMarker": "\n......\n"
 }
 ```
 
@@ -183,6 +187,7 @@ Optional environment variables:
 export AGENTPING_SUMMARY_MODEL=gpt-5.6-terra
 export AGENTPING_SUMMARY_MIN_CHARS=30
 export AGENTPING_SUMMARY_MAX_CHARS=60
+export AGENTPING_SUMMARY_INPUT_MAX_CHARS=6000
 export AGENTPING_LLM_TIMEOUT_MS=16000
 export AGENTPING_DESP_MAX_CHARS=300
 export AGENTPING_DESP_SEPARATOR='\n-----\n'
@@ -194,6 +199,9 @@ export AGENTPING_LOG_KEEP_FILES=3
 export AGENTPING_DEBUG_LOGS=0
 export AGENTPING_TITLE_TEMPLATE='{summary}'
 export AGENTPING_DESP_TEMPLATE='{separator}{finalText}'
+export AGENTPING_FINAL_TEXT_PREVIEW_HEAD_CHARS=150
+export AGENTPING_FINAL_TEXT_PREVIEW_TAIL_CHARS=50
+export AGENTPING_FINAL_TEXT_PREVIEW_MARKER='\n......\n'
 export AGENTPING_PUSHDEER_ENDPOINT=https://api2.pushdeer.com/message/push
 export AGENTPING_PUSHDEER_KEY='PDU...'
 ```
@@ -201,14 +209,17 @@ export AGENTPING_PUSHDEER_KEY='PDU...'
 `AGENTPING_PUSHDEER_KEY`, `AGENTPING_KEY`, and `PUSHDEER_KEY` override the stored config key.
 `AGENTPING_SUMMARY_MODEL`, `AGENTPING_SUMMARY_MIN_CHARS`, `AGENTPING_SUMMARY_MAX_CHARS`, and `AGENTPING_LLM_TIMEOUT_MS` override the stored summary settings.
 Summary length is prompt-guided, not enforced by hard truncation. If the model returns a slightly longer complete sentence, the notifier sends it as-is.
-`AGENTPING_DESP_MAX_CHARS` overrides the stored `desp` truncation limit. Values above 300 are capped to 300. Set it to `0` to omit `desp`.
+`AGENTPING_SUMMARY_INPUT_MAX_CHARS` limits how much of the user prompt and final answer is sent to the summary model. Long text is reduced to a first/last preview before summarization. Set it to `0` to send the full text.
+`AGENTPING_DESP_MAX_CHARS` overrides the stored `desp` truncation limit. The default is 300 characters; explicit values are capped to 1000. Set it to `0` to omit `desp`.
 `AGENTPING_DESP_SEPARATOR` overrides the marker placed before the original answer in `desp`; escaped `\n` sequences are converted to newlines. Set it to an empty string to omit the marker.
 `AGENTPING_FINAL_WAIT_MS` controls how long a notify event waits for the Codex session file to show `task_complete`. Intermediate events are skipped if no completed final answer appears within that window.
 `AGENTPING_NOTIFY_MODE` controls whether automatic notifications send. Valid values are `always`, `long_only`, `errors_only`, and `off`. The default is `always`.
 `AGENTPING_MIN_DURATION_MS` is used by `long_only`; turns shorter than this threshold are skipped.
 `AGENTPING_LOG_MAX_BYTES` and `AGENTPING_LOG_KEEP_FILES` control local log rotation. Set `AGENTPING_LOG_MAX_BYTES=0` to disable rotation.
 `AGENTPING_DEBUG_LOGS=1` allows local logs to include redacted title/desp/stderr previews. By default logs keep operational metadata such as lengths, status, summary source, elapsed time, and errors.
-`AGENTPING_TITLE_TEMPLATE` and `AGENTPING_DESP_TEMPLATE` customize PushDeer fields. Supported placeholders are `{summary}`, `{finalText}`, `{separator}`, `{duration}`, `{turnId}`, `{terminalType}`, `{summarySource}`, `{summaryModel}`, and `{summaryElapsedMs}`.
+`AGENTPING_TITLE_TEMPLATE` and `AGENTPING_DESP_TEMPLATE` customize PushDeer fields. Supported placeholders are `{summary}`, `{finalText}`, `{finalTextPreview}`, `{separator}`, `{duration}`, `{durationZh}`, `{turnId}`, `{terminalType}`, `{summarySource}`, `{summaryModel}`, and `{summaryElapsedMs}`.
+`{duration}` is compact English-style timing such as `12.3s`; `{durationZh}` is Chinese minute/second timing such as `0分 12秒`.
+`{finalTextPreview}` keeps the first `finalTextPreviewHeadChars` characters, then `finalTextPreviewMarker`, then the last `finalTextPreviewTailChars` characters.
 `AGENTPING_PROJECT_CONFIG=/path/to/.agentping.json` forces a project config file; `AGENTPING_DISABLE_PROJECT_CONFIG=1` disables project config discovery.
 
 Legacy `CODEX_PUSHDEER_*` variables and the old `~/.config/codex-pushdeer-notifier/config.json` config file are still read during migration. New writes go to `~/.config/agentping/config.json`.
@@ -229,7 +240,7 @@ agentping config set-mode long_only --min-duration-ms 30000
 agentping config set-mode off
 agentping config set-debug-logs off
 agentping config set-title-template "{summary}"
-agentping config set-desp-template "{separator}{finalText}"
+agentping config set-desp-template "用时：{durationZh}{separator}{finalTextPreview}"
 agentping config reset-templates
 agentping config init-project
 ```

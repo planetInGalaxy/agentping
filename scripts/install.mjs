@@ -11,6 +11,9 @@ import {
   DEFAULT_DESP_SEPARATOR,
   DEFAULT_DESP_TEMPLATE,
   DEFAULT_FINAL_WAIT_MS,
+  DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS,
+  DEFAULT_FINAL_TEXT_PREVIEW_MARKER,
+  DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS,
   DEFAULT_DEBUG_LOGS,
   DEFAULT_LOG_KEEP_FILES,
   DEFAULT_LOG_MAX_BYTES,
@@ -641,7 +644,10 @@ function configureDebugLogs() {
 function configureTemplates() {
   const hasExplicitValue =
     args["title-template"] !== undefined ||
-    args["desp-template"] !== undefined;
+    args["desp-template"] !== undefined ||
+    args["final-text-preview-head-chars"] !== undefined ||
+    args["final-text-preview-tail-chars"] !== undefined ||
+    args["final-text-preview-marker"] !== undefined;
 
   if (!hasExplicitValue) {
     return;
@@ -654,6 +660,15 @@ function configureTemplates() {
   }
   if (args["desp-template"] !== undefined) {
     patch.despTemplate = normalizeTemplate(args["desp-template"], current.despTemplate || DEFAULT_DESP_TEMPLATE);
+  }
+  if (args["final-text-preview-head-chars"] !== undefined) {
+    patch.finalTextPreviewHeadChars = args["final-text-preview-head-chars"];
+  }
+  if (args["final-text-preview-tail-chars"] !== undefined) {
+    patch.finalTextPreviewTailChars = args["final-text-preview-tail-chars"];
+  }
+  if (args["final-text-preview-marker"] !== undefined) {
+    patch.finalTextPreviewMarker = args["final-text-preview-marker"];
   }
 
   if (args["dry-run"]) {

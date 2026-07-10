@@ -87,7 +87,7 @@ AGENTPING_DRY_RUN=1 node plugins/agentping/scripts/pushdeer-notify.mjs \
 - Optional notification modes are `long_only`, `errors_only`, and `off`. Use `long_only` with `minDurationMs` when users only want notifications for longer tasks.
 - Use manual notification commands only for setup, tests, troubleshooting, or explicit one-off user requests.
 - Automatic completion notifications send the LLM summary in PushDeer `text`, and a separator plus the original assistant answer in `desp`.
-- Truncate automatic `desp` with `despMaxChars`; the default and hard cap are 300 characters including the separator. Set `despMaxChars` to `0` to omit `desp`.
+- Truncate automatic `desp` with `despMaxChars`; the default is 300 characters including the separator, and explicit values are capped to 1000. Set `despMaxChars` to `0` to omit `desp`.
 - Use `despSeparator` to distinguish the summary from original content when PushDeer clients display `text` and `desp` together. The default is `\n-----\n`.
 - Prompt automatic summaries toward the configured `summaryMinChars` to `summaryMaxChars` range; defaults are 30 to 60 Chinese characters.
 - Do not hard-truncate LLM summaries. If a generated summary exceeds the configured range, send it as-is so it remains understandable.

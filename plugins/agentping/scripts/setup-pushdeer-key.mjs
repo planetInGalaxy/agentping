@@ -87,6 +87,7 @@ if (args.show) {
     summaryModel: config.summaryModel,
     summaryMinChars: config.summaryMinChars,
     summaryMaxChars: config.summaryMaxChars,
+    summaryInputMaxChars: config.summaryInputMaxChars,
     llmTimeoutMs: config.llmTimeoutMs,
     despMaxChars: config.despMaxChars,
     despSeparator: config.despSeparator,
@@ -98,6 +99,9 @@ if (args.show) {
     debugLogs: config.debugLogs,
     titleTemplate: config.titleTemplate,
     despTemplate: config.despTemplate,
+    finalTextPreviewHeadChars: config.finalTextPreviewHeadChars,
+    finalTextPreviewTailChars: config.finalTextPreviewTailChars,
+    finalTextPreviewMarker: config.finalTextPreviewMarker,
   }, null, 2));
   process.exit(0);
 }

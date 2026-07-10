@@ -7,6 +7,9 @@ import {
   DEFAULT_DESP_SEPARATOR,
   DEFAULT_ENDPOINT,
   DEFAULT_FINAL_WAIT_MS,
+  DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS,
+  DEFAULT_FINAL_TEXT_PREVIEW_MARKER,
+  DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS,
   DEFAULT_LLM_TIMEOUT_MS,
   DEFAULT_LOG_KEEP_FILES,
   DEFAULT_LOG_MAX_BYTES,
@@ -15,6 +18,7 @@ import {
   DEFAULT_DESP_TEMPLATE,
   DEFAULT_SUMMARY_MAX_CHARS,
   DEFAULT_SUMMARY_MIN_CHARS,
+  DEFAULT_SUMMARY_INPUT_MAX_CHARS,
   DEFAULT_SUMMARY_MODEL,
   DEFAULT_TITLE_TEMPLATE,
   NOTIFY_MODES,
@@ -70,7 +74,7 @@ function usage() {
     "  reset [--forget-key]         Reset runtime options to defaults",
     "",
     `Modes: ${NOTIFY_MODES.join(", ")}`,
-    `Template placeholders: {summary}, {finalText}, {separator}, {duration}, {turnId}, {terminalType}, {summarySource}, {summaryModel}, {summaryElapsedMs}`,
+    `Template placeholders: {summary}, {finalText}, {finalTextPreview}, {separator}, {duration}, {durationZh}, {turnId}, {terminalType}, {summarySource}, {summaryModel}, {summaryElapsedMs}`,
   ].join("\n"));
 }
 
@@ -85,6 +89,7 @@ function showConfig() {
     summaryModel: config.summaryModel || DEFAULT_SUMMARY_MODEL,
     summaryMinChars: config.summaryMinChars,
     summaryMaxChars: config.summaryMaxChars,
+    summaryInputMaxChars: config.summaryInputMaxChars,
     llmTimeoutMs: config.llmTimeoutMs,
     despMaxChars: config.despMaxChars,
     despSeparator: config.despSeparator,
@@ -96,6 +101,9 @@ function showConfig() {
     debugLogs: config.debugLogs,
     titleTemplate: config.titleTemplate,
     despTemplate: config.despTemplate,
+    finalTextPreviewHeadChars: config.finalTextPreviewHeadChars,
+    finalTextPreviewTailChars: config.finalTextPreviewTailChars,
+    finalTextPreviewMarker: config.finalTextPreviewMarker,
   }, null, 2));
 }
 
@@ -260,6 +268,7 @@ function initProjectConfig() {
     summaryModel: DEFAULT_SUMMARY_MODEL,
     summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
     summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
+    summaryInputMaxChars: DEFAULT_SUMMARY_INPUT_MAX_CHARS,
     llmTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
     despMaxChars: DEFAULT_DESP_MAX_CHARS,
     despSeparator: DEFAULT_DESP_SEPARATOR,
@@ -268,6 +277,9 @@ function initProjectConfig() {
     minDurationMs: DEFAULT_MIN_DURATION_MS,
     titleTemplate: DEFAULT_TITLE_TEMPLATE,
     despTemplate: DEFAULT_DESP_TEMPLATE,
+    finalTextPreviewHeadChars: DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS,
+    finalTextPreviewTailChars: DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS,
+    finalTextPreviewMarker: DEFAULT_FINAL_TEXT_PREVIEW_MARKER,
   });
   console.log(`Created project AgentPing config at ${target}`);
 }
@@ -278,6 +290,7 @@ function resetConfig() {
     summaryModel: DEFAULT_SUMMARY_MODEL,
     summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
     summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
+    summaryInputMaxChars: DEFAULT_SUMMARY_INPUT_MAX_CHARS,
     llmTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
     despMaxChars: DEFAULT_DESP_MAX_CHARS,
     despSeparator: DEFAULT_DESP_SEPARATOR,
@@ -289,6 +302,9 @@ function resetConfig() {
     debugLogs: DEFAULT_DEBUG_LOGS,
     titleTemplate: DEFAULT_TITLE_TEMPLATE,
     despTemplate: DEFAULT_DESP_TEMPLATE,
+    finalTextPreviewHeadChars: DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS,
+    finalTextPreviewTailChars: DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS,
+    finalTextPreviewMarker: DEFAULT_FINAL_TEXT_PREVIEW_MARKER,
   };
   if (args["forget-key"]) {
     patch.pushkey = undefined;

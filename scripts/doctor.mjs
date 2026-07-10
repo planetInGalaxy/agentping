@@ -17,6 +17,7 @@ import {
   DEFAULT_SUMMARY_MAX_CHARS,
   DEFAULT_SUMMARY_MIN_CHARS,
   DEFAULT_TITLE_TEMPLATE,
+  MAX_DESP_MAX_CHARS,
   NOTIFY_MODES,
   configPath as agentpingConfigPath,
   configSourcePath,
@@ -203,8 +204,14 @@ const checks = {
     ok: config.summaryMinChars >= 0 && config.summaryMaxChars >= config.summaryMinChars,
     detail: `${config.summaryMinChars}-${config.summaryMaxChars} chars, default ${DEFAULT_SUMMARY_MIN_CHARS}-${DEFAULT_SUMMARY_MAX_CHARS}`,
   },
+  summaryInput: {
+    ok: config.summaryInputMaxChars >= 0,
+    detail: config.summaryInputMaxChars > 0
+      ? `${config.summaryInputMaxChars} chars sent to summary model`
+      : "uncapped",
+  },
   despMaxChars: {
-    ok: config.despMaxChars >= 0 && config.despMaxChars <= DEFAULT_DESP_MAX_CHARS,
+    ok: config.despMaxChars >= 0 && config.despMaxChars <= MAX_DESP_MAX_CHARS,
     detail: `${config.despMaxChars} chars`,
   },
   despSeparator: {
@@ -235,7 +242,7 @@ const checks = {
   },
   templates: {
     ok: typeof config.titleTemplate === "string" && typeof config.despTemplate === "string",
-    detail: `title ${JSON.stringify(config.titleTemplate || DEFAULT_TITLE_TEMPLATE)}, desp ${JSON.stringify(config.despTemplate || DEFAULT_DESP_TEMPLATE)}`,
+    detail: `title ${JSON.stringify(config.titleTemplate || DEFAULT_TITLE_TEMPLATE)}, desp ${JSON.stringify(config.despTemplate || DEFAULT_DESP_TEMPLATE)}, preview ${config.finalTextPreviewHeadChars}/${config.finalTextPreviewTailChars}`,
   },
   projectConfig: {
     ok: true,

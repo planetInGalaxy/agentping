@@ -11,6 +11,8 @@ import {
   DEFAULT_TITLE_TEMPLATE,
   charLength,
   fallbackDescription,
+  formatFinalTextPreview,
+  formatMiddlePreview,
   formatNotificationFields,
   formatDesp,
   loadConfig,
@@ -58,6 +60,7 @@ function makeTempWorkspace() {
     endpoint: "https://api2.pushdeer.com/message/push",
     summaryMinChars: 30,
     summaryMaxChars: 60,
+    summaryInputMaxChars: 6000,
     llmTimeoutMs: 3000,
     despMaxChars: 300,
     despSeparator: DEFAULT_DESP_SEPARATOR,
@@ -69,6 +72,9 @@ function makeTempWorkspace() {
     debugLogs: false,
     titleTemplate: DEFAULT_TITLE_TEMPLATE,
     despTemplate: DEFAULT_DESP_TEMPLATE,
+    finalTextPreviewHeadChars: 150,
+    finalTextPreviewTailChars: 50,
+    finalTextPreviewMarker: "\n......\n",
   }, null, 2));
   return {
     root,
@@ -218,14 +224,27 @@ function testFormatHelpers() {
       despMaxChars: 20,
       despSeparator: "\n---\n",
       titleTemplate: "[{summarySource}] {summary}",
-      despTemplate: "{separator}{duration} {finalText}",
+      despTemplate: "{separator}{durationZh} {finalText}",
     },
     durationMs: 12345,
     summarySource: "llm",
   });
   assert.equal(fields.title, "[llm] 任务完成");
-  assert.ok(fields.desp.includes("12.3s"));
+  assert.ok(fields.desp.includes("0分 12秒"));
   assert.ok(charLength(fields.desp) <= 20);
+  const longText = Array.from({ length: 260 }, (_, index) => String(index % 10)).join("");
+  const preview = formatFinalTextPreview(longText, {
+    headChars: 150,
+    tailChars: 50,
+    marker: "\n......\n",
+  });
+  assert.equal(charLength(preview), 208);
+  assert.equal(preview.slice(0, 10), "0123456789");
+  assert.match(preview, /\n\.\.\.\.\.\.\n/u);
+  assert.equal(preview.slice(-10), "0123456789");
+  const middlePreview = formatMiddlePreview(longText, 60, "\n......\n");
+  assert.equal(charLength(middlePreview), 60);
+  assert.match(middlePreview, /\n\.\.\.\.\.\.\n/u);
 }
 
 function testFinalOnlyNotification() {

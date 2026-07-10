@@ -148,7 +148,7 @@ The notifier config stores local runtime settings:
   "summaryModel": "gpt-5.6-terra",
   "summaryMinChars": 30,
   "summaryMaxChars": 60,
-  "llmTimeoutMs": 30000,
+  "llmTimeoutMs": 16000,
   "despMaxChars": 300,
   "despSeparator": "\n-----\n",
   "finalWaitMs": 8000,
@@ -167,7 +167,7 @@ Optional environment variables:
 export AGENTPING_SUMMARY_MODEL=gpt-5.6-terra
 export AGENTPING_SUMMARY_MIN_CHARS=30
 export AGENTPING_SUMMARY_MAX_CHARS=60
-export AGENTPING_LLM_TIMEOUT_MS=30000
+export AGENTPING_LLM_TIMEOUT_MS=16000
 export AGENTPING_DESP_MAX_CHARS=300
 export AGENTPING_DESP_SEPARATOR='\n-----\n'
 export AGENTPING_FINAL_WAIT_MS=8000

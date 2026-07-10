@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 export const DEFAULT_SUMMARY_MODEL = "gpt-5.6-terra";
-export const DEFAULT_LLM_TIMEOUT_MS = 30_000;
+export const DEFAULT_LLM_TIMEOUT_MS = 16_000;
 export const SUMMARY_MODEL_CANDIDATES = [
   DEFAULT_SUMMARY_MODEL,
   "gpt-5.6-sol",

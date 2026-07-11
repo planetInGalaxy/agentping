@@ -31,7 +31,7 @@ AgentPing uses Codex `notify` with the `agent-turn-complete` event and Claude Co
 
 - macOS or Linux with Node.js available as `node`.
 - Codex CLI available as `codex`, Claude Code available as `claude`, or both.
-- A separate PushDeer `pushkey` for every installed agent you want to notify from.
+- A separate PushDeer key for every installed agent you want to notify from.
 - Access to a summary model through the corresponding agent CLI.
 
 The installer detects available Codex models with `codex debug models` and stores the selected summary model in local config. If you want to force a model, pass it during install:
@@ -169,11 +169,11 @@ The notifier config stores local runtime settings:
 
 ```json
 {
-  "pushkey": "PDU...",
-  "claudePushkey": "PDU...",
+  "CodexPushKey": "PDU...",
+  "ClaudePushKey": "PDU...",
   "endpoint": "https://api2.pushdeer.com/message/push",
-  "summaryModel": "gpt-5.4-mini",
-  "claudeSummaryModel": "haiku",
+  "CodexSummaryModel": "gpt-5.4-mini",
+  "ClaudeSummaryModel": "haiku",
   "summaryMinChars": 50,
   "summaryMaxChars": 100,
   "llmTimeoutMs": 16000,
@@ -189,11 +189,18 @@ The notifier config stores local runtime settings:
   "despTemplate": "用时：{durationZh}{separator}{finalTextPreview}",
   "finalTextPreviewHeadChars": 200,
   "finalTextPreviewTailChars": 150,
-  "finalTextPreviewMarker": "\n......\n"
+  "finalTextPreviewMarker": "\n......\n",
+  "_说明": [
+    "CodexPushKey：Codex 专用 PushDeer 推送密钥；项目配置中的密钥会被忽略。",
+    "ClaudePushKey：Claude Code 专用 PushDeer 推送密钥；项目配置中的密钥会被忽略。",
+    "其他配置项的中文说明由 AgentPing 自动写入此数组。"
+  ]
 }
 ```
 
-The user-level file `~/.config/agentping/config.json` is the global base configuration and applies to every project. Each setting written by AgentPing is followed by a `fieldName__说明` entry in Chinese; these explanation entries are documentation only and do not affect runtime behavior.
+The user-level file `~/.config/agentping/config.json` is the global base configuration and applies to every project. AgentPing writes every supported global setting to this file and keeps Chinese documentation in one `_说明` array at the end, separated from active settings. The array is documentation only and does not affect runtime behavior.
+
+Older `pushkey`, `claudePushkey`, `summaryModel`, and `claudeSummaryModel` fields remain readable for backward compatibility. The next AgentPing config write migrates them to `CodexPushKey`, `ClaudePushKey`, `CodexSummaryModel`, and `ClaudeSummaryModel` automatically.
 
 Project-level settings can be stored in `.agentping.json` or `agentping.config.json` in a project directory. AgentPing starts at the current working directory, searches upward for the nearest project config, and overlays its values on top of the global config. Only settings that differ for that project need to be included. Project config intentionally ignores every Codex and Claude key field, so secrets stay in `~/.config/agentping/config.json`.
 

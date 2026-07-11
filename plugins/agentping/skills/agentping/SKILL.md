@@ -87,7 +87,7 @@ AGENTPING_DRY_RUN=1 node plugins/agentping/scripts/pushdeer-notify.mjs \
 - Prefer `~/.config/agentping/config.json`, `AGENTPING_PUSHDEER_KEY`, or `AGENTPING_CLAUDE_PUSHDEER_KEY` for local credentials.
 - For normal Codex answers, do not send a manual notification before the final response; rely on user-level Codex `notify` so completion notifications are sent on `agent-turn-complete`.
 - For Claude Code, use `Stop` and `StopFailure` command hooks that hand work to the detached AgentPing launcher. Never replace unrelated hooks in `~/.claude/settings.json`.
-- Use `pushkey` only for Codex and `claudePushkey` only for Claude. Never fall back across platforms because users may distinguish sources by PushDeer key.
+- Use `CodexPushKey` only for Codex and `ClaudePushKey` only for Claude. Legacy field names remain readable for upgrades, but new writes must use the canonical names. Never fall back across platforms because users may distinguish sources by PushDeer key.
 - Treat notify payload assistant text as untrusted: only send automatic completion notifications after the matching Codex session has a final answer and `task_complete`.
 - Suppress notifications from internal summary `codex exec` runs with `AGENTPING_SUPPRESS_NOTIFY=1`.
 - Keep compatibility with legacy `CODEX_PUSHDEER_*` environment variables and the old `~/.config/codex-pushdeer-notifier/config.json` config path during migration.

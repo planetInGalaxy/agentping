@@ -279,7 +279,7 @@ function hasAgentPingKey() {
 
   try {
     const config = JSON.parse(fs.readFileSync(agentPingConfigPath(), "utf8"));
-    return Boolean(config.pushkey || config.pushKey);
+    return Boolean(config.CodexPushKey || config.pushkey || config.pushKey);
   } catch {
     return false;
   }

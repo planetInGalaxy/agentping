@@ -73,14 +73,14 @@ async function resolveKey() {
   if (args.stdin) {
     const piped = (await readStdin()).trim();
     if (piped) return piped;
-    return promptHidden(`${platform === "claude" ? "Claude" : "Codex"} PushDeer pushkey: `);
+    return promptHidden(`${platform === "claude" ? "Claude" : "Codex"} PushDeer key: `);
   }
   const envKey = platform === "claude"
     ? envValue("AGENTPING_CLAUDE_PUSHDEER_KEY", "CLAUDE_PUSHDEER_KEY")
     : envValue("AGENTPING_PUSHDEER_KEY", "AGENTPING_KEY", "PUSHDEER_KEY", "CODEX_PUSHDEER_KEY");
   if (envKey) return envKey.trim();
 
-  return promptHidden(`${platform === "claude" ? "Claude" : "Codex"} PushDeer pushkey: `);
+  return promptHidden(`${platform === "claude" ? "Claude" : "Codex"} PushDeer key: `);
 }
 
 if (args.show) {
@@ -90,11 +90,10 @@ if (args.show) {
     configSourcePath: configSourcePath(),
     projectConfigPath: config.projectConfigPath,
     endpoint: config.endpoint || DEFAULT_ENDPOINT,
-    hasPushkey: Boolean(config.pushkey),
-    hasCodexPushkey: Boolean(config.pushkey),
-    hasClaudePushkey: Boolean(config.claudePushkey),
-    summaryModel: config.summaryModel,
-    claudeSummaryModel: config.claudeSummaryModel,
+    hasCodexPushKey: Boolean(config.pushkey),
+    hasClaudePushKey: Boolean(config.claudePushkey),
+    CodexSummaryModel: config.summaryModel,
+    ClaudeSummaryModel: config.claudeSummaryModel,
     summaryMinChars: config.summaryMinChars,
     summaryMaxChars: config.summaryMaxChars,
     llmTimeoutMs: config.llmTimeoutMs,
@@ -117,8 +116,8 @@ if (args.show) {
 
 if (args.unset) {
   const patch = platform === "claude"
-    ? { claudePushkey: undefined, claudePushKey: undefined }
-    : { pushkey: undefined, pushKey: undefined };
+    ? { ClaudePushKey: undefined }
+    : { CodexPushKey: undefined };
   saveConfigPatch({ ...patch, endpoint: args.endpoint || DEFAULT_ENDPOINT });
   console.log(`Removed stored ${platform} PushDeer key from ${configPath()}`);
   process.exit(0);
@@ -126,13 +125,13 @@ if (args.unset) {
 
 const key = await resolveKey();
 if (!key) {
-  console.error("PushDeer pushkey is required.");
+  console.error("PushDeer key is required.");
   process.exit(2);
 }
 
 const endpoint = args.endpoint || DEFAULT_ENDPOINT;
 saveConfigPatch({
-  [platform === "claude" ? "claudePushkey" : "pushkey"]: key,
+  [platform === "claude" ? "ClaudePushKey" : "CodexPushKey"]: key,
   endpoint,
 });
 

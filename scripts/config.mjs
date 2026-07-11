@@ -86,11 +86,10 @@ function showConfig() {
     configSourcePath: configSourcePath(),
     projectConfigPath: config.projectConfigPath || projectConfigSourcePath(),
     endpoint: config.endpoint || DEFAULT_ENDPOINT,
-    hasPushkey: Boolean(config.pushkey),
-    hasCodexPushkey: Boolean(config.pushkey),
-    hasClaudePushkey: Boolean(config.claudePushkey),
-    summaryModel: config.summaryModel || DEFAULT_SUMMARY_MODEL,
-    claudeSummaryModel: config.claudeSummaryModel || DEFAULT_CLAUDE_SUMMARY_MODEL,
+    hasCodexPushKey: Boolean(config.pushkey),
+    hasClaudePushKey: Boolean(config.claudePushkey),
+    CodexSummaryModel: config.summaryModel || DEFAULT_SUMMARY_MODEL,
+    ClaudeSummaryModel: config.claudeSummaryModel || DEFAULT_CLAUDE_SUMMARY_MODEL,
     summaryMinChars: config.summaryMinChars,
     summaryMaxChars: config.summaryMaxChars,
     llmTimeoutMs: config.llmTimeoutMs,
@@ -146,7 +145,7 @@ async function setKey() {
     process.exit(2);
   }
   savePatch({
-    [platform === "claude" ? "claudePushkey" : "pushkey"]: key,
+    [platform === "claude" ? "ClaudePushKey" : "CodexPushKey"]: key,
     endpoint: args.endpoint || DEFAULT_ENDPOINT,
   }, `Saved ${platform} PushDeer key`);
 }
@@ -158,8 +157,8 @@ function unsetKey() {
     process.exit(2);
   }
   const patch = platform === "claude"
-    ? { claudePushkey: undefined, claudePushKey: undefined }
-    : { pushkey: undefined, pushKey: undefined };
+    ? { ClaudePushKey: undefined }
+    : { CodexPushKey: undefined };
   savePatch(patch, `Removed stored ${platform} PushDeer key`);
 }
 
@@ -283,8 +282,8 @@ function initProjectConfig() {
     process.exit(2);
   }
   writeJson0600(target, configWithChineseComments({
-    summaryModel: DEFAULT_SUMMARY_MODEL,
-    claudeSummaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
+    CodexSummaryModel: DEFAULT_SUMMARY_MODEL,
+    ClaudeSummaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
     summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
     summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
     llmTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
@@ -305,8 +304,8 @@ function initProjectConfig() {
 function resetConfig() {
   const patch = {
     endpoint: DEFAULT_ENDPOINT,
-    summaryModel: DEFAULT_SUMMARY_MODEL,
-    claudeSummaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
+    CodexSummaryModel: DEFAULT_SUMMARY_MODEL,
+    ClaudeSummaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
     summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
     summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
     llmTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
@@ -325,10 +324,8 @@ function resetConfig() {
     finalTextPreviewMarker: DEFAULT_FINAL_TEXT_PREVIEW_MARKER,
   };
   if (args["forget-key"]) {
-    patch.pushkey = undefined;
-    patch.pushKey = undefined;
-    patch.claudePushkey = undefined;
-    patch.claudePushKey = undefined;
+    patch.CodexPushKey = undefined;
+    patch.ClaudePushKey = undefined;
   }
   savePatch(patch, args["forget-key"] ? "Reset config and removed PushDeer key" : "Reset runtime config");
 }

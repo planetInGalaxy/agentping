@@ -30,12 +30,36 @@ export const CODEX_SUMMARY_BASE_URL = "https://chatgpt.com/backend-api/codex";
 export const NOTIFY_MODES = ["always", "long_only", "errors_only", "off"];
 export const PROJECT_CONFIG_FILES = [".agentping.json", "agentping.config.json"];
 
+const DEFAULT_STORED_CONFIG = {
+  CodexPushKey: undefined,
+  ClaudePushKey: undefined,
+  endpoint: DEFAULT_ENDPOINT,
+  CodexSummaryModel: DEFAULT_SUMMARY_MODEL,
+  ClaudeSummaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
+  summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
+  summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
+  llmTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
+  despMaxChars: DEFAULT_DESP_MAX_CHARS,
+  despSeparator: DEFAULT_DESP_SEPARATOR,
+  finalWaitMs: DEFAULT_FINAL_WAIT_MS,
+  notifyMode: DEFAULT_NOTIFY_MODE,
+  minDurationMs: DEFAULT_MIN_DURATION_MS,
+  logMaxBytes: DEFAULT_LOG_MAX_BYTES,
+  logKeepFiles: DEFAULT_LOG_KEEP_FILES,
+  debugLogs: DEFAULT_DEBUG_LOGS,
+  titleTemplate: DEFAULT_TITLE_TEMPLATE,
+  despTemplate: DEFAULT_DESP_TEMPLATE,
+  finalTextPreviewHeadChars: DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS,
+  finalTextPreviewTailChars: DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS,
+  finalTextPreviewMarker: DEFAULT_FINAL_TEXT_PREVIEW_MARKER,
+};
+
 export const CONFIG_FIELD_COMMENTS = {
-  pushkey: "PushDeer 推送密钥，仅供 Codex 通知使用；项目配置里的密钥会被忽略。",
-  claudePushkey: "Claude Code 专用 PushDeer 推送密钥；与 Codex 分开配置，项目配置里的密钥会被忽略。",
+  CodexPushKey: "Codex 专用 PushDeer 推送密钥；项目配置中的密钥会被忽略。",
+  ClaudePushKey: "Claude Code 专用 PushDeer 推送密钥；项目配置中的密钥会被忽略。",
   endpoint: "PushDeer 服务端的消息推送接口地址。",
-  summaryModel: "用于生成通知摘要的 Codex 模型。",
-  claudeSummaryModel: "用于生成 Claude Code 通知摘要的 Claude 模型。",
+  CodexSummaryModel: "用于生成 Codex 通知摘要的模型。",
+  ClaudeSummaryModel: "用于生成 Claude Code 通知摘要的模型。",
   summaryMinChars: "LLM 摘要期望的最少汉字数，会动态写入摘要 Prompt。",
   summaryMaxChars: "LLM 摘要期望的最多汉字数，会动态写入摘要 Prompt；为保证语句完整不会强制截断。",
   llmTimeoutMs: "等待 LLM 生成摘要的最长毫秒数；超时后改用本地摘要。",
@@ -54,15 +78,39 @@ export const CONFIG_FIELD_COMMENTS = {
   finalTextPreviewMarker: "{finalTextPreview} 省略中间内容时插入的标记。",
 };
 
-export function configWithChineseComments(config) {
-  const output = {};
-  for (const [key, value] of Object.entries(config || {})) {
-    if (key.endsWith("__说明")) continue;
-    output[key] = value;
-    if (CONFIG_FIELD_COMMENTS[key]) {
-      output[`${key}__说明`] = CONFIG_FIELD_COMMENTS[key];
-    }
+const STORED_CONFIG_ALIASES = {
+  CodexPushKey: ["pushkey", "pushKey", "pushdeerKey"],
+  ClaudePushKey: ["claudePushkey", "claudePushKey", "claude_pushkey"],
+  CodexSummaryModel: ["summaryModel", "summary_model"],
+  ClaudeSummaryModel: ["claudeSummaryModel", "claude_summary_model"],
+};
+
+function canonicalizeStoredConfig(config) {
+  const output = { ...(config || {}) };
+  delete output._说明;
+  for (const key of Object.keys(output)) {
+    if (key.endsWith("__说明")) delete output[key];
   }
+  for (const [canonical, aliases] of Object.entries(STORED_CONFIG_ALIASES)) {
+    if (!Object.prototype.hasOwnProperty.call(output, canonical)) {
+      const alias = aliases.find((name) => Object.prototype.hasOwnProperty.call(output, name));
+      if (alias) output[canonical] = output[alias];
+    }
+    for (const alias of aliases) delete output[alias];
+  }
+  return output;
+}
+
+export function configWithChineseComments(config) {
+  const output = canonicalizeStoredConfig(config);
+  const comments = [];
+  for (const [key, value] of Object.entries(output)) {
+    if (value === undefined) delete output[key];
+  }
+  for (const key of Object.keys(output)) {
+    if (CONFIG_FIELD_COMMENTS[key]) comments.push(`${key}：${CONFIG_FIELD_COMMENTS[key]}`);
+  }
+  if (comments.length > 0) output._说明 = comments;
   return output;
 }
 
@@ -266,9 +314,11 @@ function stripProjectSecrets(config) {
   delete output.pushkey;
   delete output.pushKey;
   delete output.pushdeerKey;
+  delete output.CodexPushKey;
   delete output.claudePushkey;
   delete output.claudePushKey;
   delete output.claude_pushkey;
+  delete output.ClaudePushKey;
   return output;
 }
 
@@ -296,22 +346,26 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     DEFAULT_ENDPOINT;
   const pushkey =
     envValue("AGENTPING_PUSHDEER_KEY", "AGENTPING_KEY", "PUSHDEER_KEY", "CODEX_PUSHDEER_KEY") ||
+    config.CodexPushKey ||
     config.pushkey ||
     config.pushKey ||
     "";
   const claudePushkey =
     envValue("AGENTPING_CLAUDE_PUSHDEER_KEY", "CLAUDE_PUSHDEER_KEY") ||
+    config.ClaudePushKey ||
     config.claudePushkey ||
     config.claudePushKey ||
     config.claude_pushkey ||
     "";
   const summaryModel =
     envValue("AGENTPING_SUMMARY_MODEL", "CODEX_PUSHDEER_SUMMARY_MODEL") ||
+    config.CodexSummaryModel ||
     config.summaryModel ||
     config.summary_model ||
     DEFAULT_SUMMARY_MODEL;
   const claudeSummaryModel =
     envValue("AGENTPING_CLAUDE_SUMMARY_MODEL") ||
+    config.ClaudeSummaryModel ||
     config.claudeSummaryModel ||
     config.claude_summary_model ||
     DEFAULT_CLAUDE_SUMMARY_MODEL;
@@ -452,9 +506,12 @@ export function pushkeyForPlatform(config, platform = "codex") {
 
 export function saveConfigPatch(patch) {
   const current = readJsonIfExists(configPath(), null) ?? readJsonIfExists(configSourcePath(), {});
+  const canonicalCurrent = canonicalizeStoredConfig(current);
+  const canonicalPatch = canonicalizeStoredConfig(patch);
   writeJson0600(configPath(), configWithChineseComments({
-    ...current,
-    ...patch,
+    ...DEFAULT_STORED_CONFIG,
+    ...canonicalCurrent,
+    ...canonicalPatch,
   }));
 }
 

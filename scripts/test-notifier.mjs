@@ -28,6 +28,7 @@ import {
   normalizeNotifyMode,
   normalizeSummaryCharBounds,
   pushkeyForPlatform,
+  saveConfigPatch,
 } from "../plugins/agentping/scripts/pushdeer-lib.mjs";
 import {
   notifyCommandForScript,
@@ -284,11 +285,21 @@ function readLog(workspace) {
 
 function testFormatHelpers() {
   const documentedConfig = configWithChineseComments({
+    pushkey: "codex-key",
+    claudePushkey: "claude-key",
+    summaryModel: "gpt-5.4-mini",
+    claudeSummaryModel: "haiku",
     summaryMinChars: 50,
     summaryMaxChars: 100,
   });
-  assert.match(documentedConfig.summaryMinChars__说明, /Prompt/u);
-  assert.match(documentedConfig.summaryMaxChars__说明, /不会强制截断/u);
+  assert.equal(documentedConfig.CodexPushKey, "codex-key");
+  assert.equal(documentedConfig.ClaudePushKey, "claude-key");
+  assert.equal(documentedConfig.CodexSummaryModel, "gpt-5.4-mini");
+  assert.equal(documentedConfig.ClaudeSummaryModel, "haiku");
+  assert.equal(documentedConfig.pushkey, undefined);
+  assert.ok(Array.isArray(documentedConfig._说明));
+  assert.ok(documentedConfig._说明.some((line) => /summaryMinChars.*Prompt/u.test(line)));
+  assert.ok(documentedConfig._说明.some((line) => /summaryMaxChars.*不会强制截断/u.test(line)));
   assert.equal(pushkeyForPlatform({ pushkey: "codex-key", claudePushkey: "claude-key" }, "codex"), "codex-key");
   assert.equal(pushkeyForPlatform({ pushkey: "codex-key", claudePushkey: "claude-key" }, "claude"), "claude-key");
   const { summaryMinChars, summaryMaxChars } = normalizeSummaryCharBounds(60, 30);
@@ -366,6 +377,55 @@ function testFormatHelpers() {
     codexTransportDiagnostics("stream disconnected - retrying\nfalling back to HTTP", { timedOut: true }),
     { transport: "https", transportRetries: 1, timeoutStage: "transport_retry" },
   );
+}
+
+function testConfigFieldMigration() {
+  const workspace = makeTempWorkspace();
+  const previousAgentConfig = process.env.AGENTPING_CONFIG;
+  const previousLegacyConfig = process.env.CODEX_PUSHDEER_CONFIG;
+
+  try {
+    fs.writeFileSync(workspace.configPath, `${JSON.stringify({
+      pushkey: "legacy-codex-key",
+      claudePushkey: "legacy-claude-key",
+      summaryModel: "legacy-codex-model",
+      claudeSummaryModel: "legacy-claude-model",
+      summaryMinChars: 40,
+      summaryMinChars__说明: "旧格式说明",
+    }, null, 2)}\n`);
+    process.env.AGENTPING_CONFIG = workspace.configPath;
+    delete process.env.CODEX_PUSHDEER_CONFIG;
+
+    saveConfigPatch({ summaryMaxChars: 90 });
+    const stored = JSON.parse(fs.readFileSync(workspace.configPath, "utf8"));
+    assert.equal(stored.CodexPushKey, "legacy-codex-key");
+    assert.equal(stored.ClaudePushKey, "legacy-claude-key");
+    assert.equal(stored.CodexSummaryModel, "legacy-codex-model");
+    assert.equal(stored.ClaudeSummaryModel, "legacy-claude-model");
+    assert.equal(stored.pushkey, undefined);
+    assert.equal(stored.claudePushkey, undefined);
+    assert.equal(stored.summaryModel, undefined);
+    assert.equal(stored.claudeSummaryModel, undefined);
+    assert.equal(stored.summaryMinChars__说明, undefined);
+    assert.ok(Array.isArray(stored._说明));
+    assert.equal(stored.llmTimeoutMs, 16_000);
+    assert.equal(stored.notifyMode, "long_only");
+    assert.equal(stored.logMaxBytes, 2 * 1024 * 1024);
+    assert.equal(stored.debugLogs, false);
+
+    const loaded = loadConfig();
+    assert.equal(loaded.pushkey, "legacy-codex-key");
+    assert.equal(loaded.claudePushkey, "legacy-claude-key");
+    assert.equal(loaded.summaryModel, "legacy-codex-model");
+    assert.equal(loaded.claudeSummaryModel, "legacy-claude-model");
+    assert.equal(loaded.summaryMaxChars, 90);
+  } finally {
+    if (previousAgentConfig === undefined) delete process.env.AGENTPING_CONFIG;
+    else process.env.AGENTPING_CONFIG = previousAgentConfig;
+    if (previousLegacyConfig === undefined) delete process.env.CODEX_PUSHDEER_CONFIG;
+    else process.env.CODEX_PUSHDEER_CONFIG = previousLegacyConfig;
+    cleanupTempWorkspace(workspace);
+  }
 }
 
 function testFinalOnlyNotification() {
@@ -459,15 +519,15 @@ function testProjectConfigOverrides() {
     const projectDir = path.join(workspace.root, "project", "nested");
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(path.join(workspace.root, "project", ".agentping.json"), JSON.stringify({
-      pushkey: "project-should-not-win",
-      claudePushkey: "project-claude-should-not-win",
+      CodexPushKey: "project-should-not-win",
+      ClaudePushKey: "project-claude-should-not-win",
       notifyMode: "long_only",
       minDurationMs: 12345,
       titleTemplate: "项目 {summary}",
     }, null, 2));
     fs.writeFileSync(workspace.configPath, JSON.stringify({
-      pushkey: "user-key",
-      claudePushkey: "user-claude-key",
+      CodexPushKey: "user-key",
+      ClaudePushKey: "user-claude-key",
       notifyMode: "always",
       minDurationMs: 30000,
     }, null, 2));
@@ -819,6 +879,7 @@ function testPushReal() {
 
 const tests = {
   format: () => test("format helpers", testFormatHelpers),
+  config_migration: () => test("config field migration", testConfigFieldMigration),
   final: () => test("final-only notification", testFinalOnlyNotification),
   summary: () => test("LLM summary is used whole", testLlmSummaryIsUsedWhole),
   logs: () => test("log rotation", testLogRotation),
@@ -834,6 +895,7 @@ const tests = {
 
 if (command === "all") {
   tests.format();
+  tests.config_migration();
   tests.final();
   tests.summary();
   tests.logs();
@@ -847,7 +909,7 @@ if (command === "all") {
 } else if (tests[command]) {
   tests[command]();
 } else {
-  console.error("Usage: agentping test [all|format|final|summary|logs|legacy|project|notify|claude_hooks|claude_stop|claude_modes|claude_live|push] [--real]");
+  console.error("Usage: agentping test [all|format|config_migration|final|summary|logs|legacy|project|notify|claude_hooks|claude_stop|claude_modes|claude_live|push] [--real]");
   process.exit(2);
 }
 

@@ -1,0 +1,10 @@
+{
+  "id": "agentping",
+  "name": "AgentPing",
+  "description": "Send completion events to the local AgentPing notification worker.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

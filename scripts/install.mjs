@@ -38,6 +38,7 @@ import {
   normalizeSummaryCharBounds,
   normalizeTemplate,
   saveConfigPatch,
+  saveAgentConfigPatch,
 } from "../plugins/agentping/scripts/pushdeer-lib.mjs";
 import {
   claudeSettingsPath,
@@ -51,10 +52,17 @@ import {
   notifyCommandForScript,
   replaceTopLevelNotify,
 } from "./notify-config.mjs";
+import {
+  installHermesIntegration,
+  installOpenClawIntegration,
+} from "./platform-integrations.mjs";
+import { installRuntime, runtimeCurrentPath } from "./runtime-install.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), "..");
-const pluginRoot = path.join(projectRoot, "plugins", "agentping");
+const packageVersion = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf8")).version;
+const runtimeRoot = runtimeCurrentPath();
+const pluginRoot = path.join(runtimeRoot, "plugins", "agentping");
 const notifyScript = path.join(pluginRoot, "scripts", "pushdeer-notify-event.mjs");
 const claudeNotifyScript = path.join(pluginRoot, "scripts", "claude-notify-launcher.mjs");
 const legacyNotifyScript = path.join(
@@ -240,6 +248,17 @@ function configureClaudeHooks() {
   console.log(`Configured Claude Stop and StopFailure hooks in ${settingsFile}`);
 }
 
+function installExternalAgentIntegrations() {
+  if (!args["skip-openclaw"]) {
+    const result = installOpenClawIntegration({ runtimeRoot, dryRun: Boolean(args["dry-run"]) });
+    console.log(`${result.installed ? "Configured" : "Skipped"} OpenClaw integration: ${result.detail}`);
+  }
+  if (!args["skip-hermes"]) {
+    const result = installHermesIntegration({ runtimeRoot, dryRun: Boolean(args["dry-run"]) });
+    console.log(`${result.installed ? "Configured" : "Skipped"} Hermes integration: ${result.detail}`);
+  }
+}
+
 function managedShimSource({ computerUseCommand = "" } = {}) {
   return `#!/usr/bin/env node
 // AgentPing managed notify multiplexer. Safe to regenerate with AgentPing install.
@@ -279,7 +298,7 @@ function hasAgentPingKey() {
 
   try {
     const config = JSON.parse(fs.readFileSync(agentPingConfigPath(), "utf8"));
-    return Boolean(config.CodexPushKey || config.pushkey || config.pushKey);
+    return Boolean(config.agents?.codex?.PushKey || config.CodexPushKey || config.pushkey || config.pushKey);
   } catch {
     return false;
   }
@@ -472,19 +491,50 @@ function configureClaudePushDeerKey() {
   run(process.execPath, setupArgs, { stdio: "inherit" });
 }
 
+function configureAdditionalAgentKey(agentId, command, optionPrefix) {
+  if (!commandAvailable(command) || args[`skip-${agentId}`] || args["skip-key"]) return;
+  const current = loadAgentPingConfig({ agentId, agentType: agentId });
+  const explicitKey = args[`${optionPrefix}-key`] ||
+    process.env[`AGENTPING_${agentId.toUpperCase()}_PUSHDEER_KEY`];
+  if (current.agentPushKey && !args[`force-${optionPrefix}-key`] && !explicitKey) {
+    console.log(`${agentId} PushDeer key already configured in ${agentpingConfigPath()}`);
+    return;
+  }
+  if (!explicitKey && !input.isTTY) {
+    console.log(`Skipped ${agentId} PushDeer key; use --${optionPrefix}-key or agentping config set-key --agent ${agentId}.`);
+    return;
+  }
+  const setupArgs = [setupScript, "--agent", agentId];
+  if (explicitKey) setupArgs.push("--key", String(explicitKey));
+  if (args.test) setupArgs.push("--test");
+  if (args["dry-run"]) setupArgs.push("--dry-run");
+  run(process.execPath, setupArgs, { stdio: "inherit" });
+}
+
 function migrateLegacyConfig() {
   const target = agentpingConfigPath();
   const source = configSourcePath();
-  if (path.resolve(source) === path.resolve(target)) return;
-  if (fs.existsSync(target)) return;
+  let current = {};
+  try {
+    current = fs.existsSync(source) ? JSON.parse(fs.readFileSync(source, "utf8")) : {};
+  } catch (error) {
+    console.error(`Could not parse AgentPing config at ${source}: ${error?.message || String(error)}`);
+    process.exit(2);
+  }
+  const alreadyCurrent = current.configVersion === 2 && current.agents && typeof current.agents === "object";
+  if (alreadyCurrent && path.resolve(source) === path.resolve(target)) return;
 
   if (args["dry-run"]) {
-    console.log(`[dry-run] migrate config from ${source} to ${target}`);
+    console.log(`[dry-run] migrate config schema from ${source} to ${target}`);
     return;
   }
 
+  if (fs.existsSync(target)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    fs.copyFileSync(target, `${target}.backup-${stamp}`);
+  }
   saveConfigPatch({});
-  console.log(`Migrated AgentPing config from ${source} to ${target}`);
+  console.log(`Migrated AgentPing config schema from ${source} to ${target}`);
 }
 
 function configureSummaryModel() {
@@ -520,10 +570,11 @@ function configureSummaryModel() {
     return;
   }
 
-  saveConfigPatch({
+  saveAgentConfigPatch("codex", {
+    summaryProvider: "codex",
     summaryModel,
-    llmTimeoutMs,
-  });
+    summaryTimeoutMs: llmTimeoutMs,
+  }, { agentType: "codex" });
   console.log(`Configured summary model ${summaryModel} (${llmTimeoutMs}ms timeout)`);
   if (selection.catalogError) {
     console.log(`Model detection warning: ${selection.catalogError}`);
@@ -531,7 +582,7 @@ function configureSummaryModel() {
 }
 
 function configureClaudeSummaryModel() {
-  if (!commandAvailable("claude") || args["skip-claude"]) return;
+  if (!commandAvailable("claude") || args["skip-claude"] || args["skip-model-check"]) return;
   const current = loadAgentPingConfig();
   const claudeSummaryModel = String(
     args["claude-summary-model"] || current.claudeSummaryModel || DEFAULT_CLAUDE_SUMMARY_MODEL,
@@ -540,7 +591,10 @@ function configureClaudeSummaryModel() {
     console.log(`[dry-run] write claudeSummaryModel=${claudeSummaryModel} to ${agentpingConfigPath()}`);
     return;
   }
-  saveConfigPatch({ claudeSummaryModel });
+  saveAgentConfigPatch("claude", {
+    summaryProvider: "claude",
+    summaryModel: claudeSummaryModel,
+  }, { agentType: "claude" });
   console.log(`Configured Claude summary model ${claudeSummaryModel}`);
 }
 
@@ -769,9 +823,16 @@ function configureTemplates() {
   console.log("Configured notification templates");
 }
 
+const runtimeInstall = installRuntime({
+  projectRoot,
+  version: packageVersion,
+  dryRun: Boolean(args["dry-run"]),
+});
+console.log(`Prepared AgentPing runtime ${packageVersion} at ${runtimeInstall.currentPath}`);
 installPlugin();
 await configureNotify();
 configureClaudeHooks();
+installExternalAgentIntegrations();
 configureLegacyNotifyShim();
 migrateLegacyConfig();
 configureSummaryModel();
@@ -786,8 +847,10 @@ configureDebugLogs();
 configureTemplates();
 configureCodexPushDeerKey();
 configureClaudePushDeerKey();
+configureAdditionalAgentKey("openclaw", "openclaw", "openclaw");
+configureAdditionalAgentKey("hermes", "hermes", "hermes");
 
 console.log("");
 console.log("Installation complete.");
-console.log("Codex uses the notify setting immediately for new turns; Claude Code reloads settings automatically.");
+console.log("Installed agents will use the shared AgentPing runtime on their next completed turn.");
 console.log("Use `npm run doctor` to check local setup.");

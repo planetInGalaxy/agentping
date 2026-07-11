@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   DEFAULT_DEBUG_LOGS,
+  DEFAULT_AGENT_CONFIGS,
   DEFAULT_CLAUDE_SUMMARY_MODEL,
   DEFAULT_DESP_MAX_CHARS,
   DEFAULT_DESP_SEPARATOR,
@@ -42,6 +43,7 @@ import {
   projectConfigSourcePath,
   readStdin,
   saveConfigPatch,
+  saveAgentConfigPatch,
   writeJson0600,
 } from "../plugins/agentping/scripts/pushdeer-lib.mjs";
 
@@ -55,10 +57,13 @@ function usage() {
     "Commands:",
     "  show                         Show effective config without revealing the PushDeer key",
     "  path                         Print config file path",
-    "  set-key --key <key>          Save PushDeer key; use --platform codex|claude",
+    "  set-key --key <key>          Save PushDeer key; use --agent <agentId>",
     "  set-key --stdin              Read PushDeer key from stdin",
     "  unset-key                    Remove stored PushDeer key",
+    "  set-enabled <on|off>         Enable or disable one agent config",
     "  set-summary-range <min> <max> Configure LLM summary length",
+    "  set-summary-provider <name>  Configure agent summary provider: codex|claude|none",
+    "  set-summary-model <model>    Configure agent summary model",
     "  set-summary-fallback <text>   Configure fixed title used when LLM summary is unavailable",
     "  set-timeout <ms>             Configure LLM summary timeout",
     "  set-desp-max <chars>         Configure desp length; -1 unlimited, 0 disables desp",
@@ -83,6 +88,14 @@ function usage() {
 
 function showConfig() {
   const config = loadConfig();
+  const agents = Object.fromEntries(Object.entries(config.agents || {}).map(([agentId, agent]) => [agentId, {
+    type: agent.type || agentId,
+    enabled: agent.enabled !== false,
+    hasPushKey: Boolean(agent.PushKey),
+    summaryProvider: agent.summaryProvider,
+    summaryModel: agent.summaryModel,
+    summaryTimeoutMs: agent.summaryTimeoutMs,
+  }]));
   console.log(JSON.stringify({
     configPath: configPath(),
     configSourcePath: configSourcePath(),
@@ -90,6 +103,7 @@ function showConfig() {
     endpoint: config.endpoint || DEFAULT_ENDPOINT,
     hasCodexPushKey: Boolean(config.pushkey),
     hasClaudePushKey: Boolean(config.claudePushkey),
+    agents,
     CodexSummaryModel: config.summaryModel || DEFAULT_SUMMARY_MODEL,
     ClaudeSummaryModel: config.claudeSummaryModel || DEFAULT_CLAUDE_SUMMARY_MODEL,
     summaryMinChars: config.summaryMinChars,
@@ -133,12 +147,26 @@ function savePatch(patch, message) {
   console.log(`${message} (${configPath()})`);
 }
 
+function selectedAgentId() {
+  return String(args.agent || args.platform || "codex").trim().toLowerCase();
+}
+
+function selectedAgentType(agentId = selectedAgentId()) {
+  return String(args.type || configAgentType(agentId)).trim().toLowerCase();
+}
+
+function configAgentType(agentId) {
+  return loadConfig({ agentId }).agents?.[agentId]?.type || agentId;
+}
+
+function saveAgentPatch(patch, message) {
+  const agentId = selectedAgentId();
+  saveAgentConfigPatch(agentId, patch, { agentType: selectedAgentType(agentId) });
+  console.log(`${message} for ${agentId} (${configPath()})`);
+}
+
 async function setKey() {
-  const platform = String(args.platform || "codex").trim().toLowerCase();
-  if (!new Set(["codex", "claude"]).has(platform)) {
-    console.error("platform must be codex or claude");
-    process.exit(2);
-  }
+  const agentId = selectedAgentId();
   let key = args.key ? String(args.key).trim() : "";
   if (!key && args.stdin) {
     key = (await readStdin()).trim();
@@ -147,22 +175,22 @@ async function setKey() {
     console.error("PushDeer key is required. Use --key <key> or --stdin.");
     process.exit(2);
   }
-  savePatch({
-    [platform === "claude" ? "ClaudePushKey" : "CodexPushKey"]: key,
-    endpoint: args.endpoint || DEFAULT_ENDPOINT,
-  }, `Saved ${platform} PushDeer key`);
+  if (args.endpoint) savePatch({ endpoint: args.endpoint }, "Configured PushDeer endpoint");
+  saveAgentPatch({ PushKey: key }, "Saved PushDeer key");
 }
 
 function unsetKey() {
-  const platform = String(args.platform || "codex").trim().toLowerCase();
-  if (!new Set(["codex", "claude"]).has(platform)) {
-    console.error("platform must be codex or claude");
+  saveAgentPatch({ PushKey: undefined }, "Removed stored PushDeer key");
+}
+
+function setAgentEnabled() {
+  const value = rawValue(1, "value", "enabled");
+  if (value === undefined) {
+    console.error("enabled value is required: on or off.");
     process.exit(2);
   }
-  const patch = platform === "claude"
-    ? { ClaudePushKey: undefined }
-    : { CodexPushKey: undefined };
-  savePatch(patch, `Removed stored ${platform} PushDeer key`);
+  const enabled = normalizeBoolean(value, true);
+  saveAgentPatch({ enabled }, `${enabled ? "Enabled" : "Disabled"} agent notifications`);
 }
 
 function setSummaryRange() {
@@ -189,7 +217,25 @@ function setSummaryFallback() {
 function setTimeoutMs() {
   const value = Number.parseInt(numberValue(1, "timeout ms", "ms"), 10);
   const llmTimeoutMs = Number.isFinite(value) && value > 0 ? value : DEFAULT_LLM_TIMEOUT_MS;
-  savePatch({ llmTimeoutMs }, `Configured LLM summary timeout ${llmTimeoutMs}ms`);
+  saveAgentPatch({ summaryTimeoutMs: llmTimeoutMs }, `Configured LLM summary timeout ${llmTimeoutMs}ms`);
+}
+
+function setSummaryProvider() {
+  const summaryProvider = String(rawValue(1, "provider") || "").trim().toLowerCase();
+  if (!new Set(["codex", "claude", "none"]).has(summaryProvider)) {
+    console.error("summary provider must be codex, claude, or none");
+    process.exit(2);
+  }
+  saveAgentPatch({ summaryProvider }, `Configured summary provider ${summaryProvider}`);
+}
+
+function setSummaryModel() {
+  const summaryModel = String(rawValue(1, "model") || "").trim();
+  if (!summaryModel) {
+    console.error("summary model is required.");
+    process.exit(2);
+  }
+  saveAgentPatch({ summaryModel }, `Configured summary model ${summaryModel}`);
 }
 
 function setDespMax() {
@@ -295,8 +341,13 @@ function initProjectConfig() {
     process.exit(2);
   }
   writeJson0600(target, configWithChineseComments({
-    CodexSummaryModel: DEFAULT_SUMMARY_MODEL,
-    ClaudeSummaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
+    agents: Object.fromEntries(Object.entries(DEFAULT_AGENT_CONFIGS).map(([agentId, agent]) => [agentId, {
+      type: agent.type,
+      enabled: agent.enabled,
+      summaryProvider: agent.summaryProvider,
+      summaryModel: agent.summaryModel,
+      summaryTimeoutMs: agent.summaryTimeoutMs,
+    }])),
     summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
     summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
     summaryFallbackText: DEFAULT_SUMMARY_FALLBACK_TEXT,
@@ -318,12 +369,10 @@ function initProjectConfig() {
 function resetConfig() {
   const patch = {
     endpoint: DEFAULT_ENDPOINT,
-    CodexSummaryModel: DEFAULT_SUMMARY_MODEL,
-    ClaudeSummaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
+    agents: DEFAULT_AGENT_CONFIGS,
     summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
     summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
     summaryFallbackText: DEFAULT_SUMMARY_FALLBACK_TEXT,
-    llmTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
     despMaxChars: DEFAULT_DESP_MAX_CHARS,
     despSeparator: DEFAULT_DESP_SEPARATOR,
     finalWaitMs: DEFAULT_FINAL_WAIT_MS,
@@ -339,8 +388,9 @@ function resetConfig() {
     finalTextPreviewMarker: DEFAULT_FINAL_TEXT_PREVIEW_MARKER,
   };
   if (args["forget-key"]) {
-    patch.CodexPushKey = undefined;
-    patch.ClaudePushKey = undefined;
+    for (const agentId of Object.keys(loadConfig().agents || {})) {
+      saveAgentConfigPatch(agentId, { PushKey: undefined });
+    }
   }
   savePatch(patch, args["forget-key"] ? "Reset config and removed PushDeer key" : "Reset runtime config");
 }
@@ -358,8 +408,17 @@ switch (command) {
   case "unset-key":
     unsetKey();
     break;
+  case "set-enabled":
+    setAgentEnabled();
+    break;
   case "set-summary-range":
     setSummaryRange();
+    break;
+  case "set-summary-provider":
+    setSummaryProvider();
+    break;
+  case "set-summary-model":
+    setSummaryModel();
     break;
   case "set-summary-fallback":
     setSummaryFallback();

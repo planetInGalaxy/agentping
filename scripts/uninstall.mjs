@@ -10,10 +10,15 @@ import {
   removeClaudeHooks,
   writeClaudeSettings,
 } from "./claude-hooks.mjs";
+import {
+  removeHermesIntegration,
+  removeOpenClawIntegration,
+} from "./platform-integrations.mjs";
+import { runtimeCurrentPath } from "./runtime-install.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), "..");
-const pluginRoot = path.join(projectRoot, "plugins", "agentping");
+const pluginRoot = path.join(runtimeCurrentPath(), "plugins", "agentping");
 const notifyScript = path.join(pluginRoot, "scripts", "pushdeer-notify-event.mjs");
 const claudeNotifyScript = path.join(pluginRoot, "scripts", "claude-notify-launcher.mjs");
 const legacyNotifyScript = path.join(
@@ -77,7 +82,7 @@ function removeNotifyLine() {
   const lines = fs.readFileSync(configFile, "utf8").split(/\r?\n/);
   const next = lines.filter((line) => ![desiredLine, legacyLine].includes(line.trim()));
   if (next.length === lines.length) {
-    console.log("Codex notify was not changed because it does not point at this checkout.");
+    console.log("Codex notify was not changed because it does not point at AgentPing.");
     return;
   }
 
@@ -125,12 +130,21 @@ if (args["remove-marketplace"]) {
 }
 removeNotifyLine();
 if (!args["keep-claude-hooks"]) removeClaudeHookSettings();
+if (!args["keep-openclaw"]) {
+  const result = removeOpenClawIntegration({ dryRun: Boolean(args["dry-run"]) });
+  console.log(`${result.changed ? "Removed" : "Skipped"} OpenClaw integration: ${result.detail}`);
+}
+if (!args["keep-hermes"]) {
+  const result = removeHermesIntegration({ dryRun: Boolean(args["dry-run"]) });
+  console.log(`${result.changed ? "Removed" : "Skipped"} Hermes integration: ${result.detail}`);
+}
 
 if (args["forget-key"]) {
-  run(process.execPath, [setupScript, "--unset"], { allowFailure: false });
-  run(process.execPath, [setupScript, "--platform", "claude", "--unset"], { allowFailure: false });
+  for (const agent of ["codex", "claude", "openclaw", "hermes"]) {
+    run(process.execPath, [setupScript, "--agent", agent, "--unset"], { allowFailure: false });
+  }
 } else {
-  console.log("Codex and Claude PushDeer keys were left in place. Re-run with --forget-key to remove both.");
+  console.log("Agent PushDeer keys were left in place. Re-run with --forget-key to remove all of them.");
 }
 
 console.log("Uninstall complete.");

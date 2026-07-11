@@ -36,6 +36,27 @@ import {
   notifyLineForCommand,
   replaceTopLevelNotify,
 } from "./notify-config.mjs";
+import {
+  acquireQueueLock,
+  claimNextEvent,
+  completeClaim,
+  enqueueCompletionEvent,
+  failClaim,
+  queuePaths,
+  queueStatus,
+  requeueFailedEvents,
+  releaseQueueLock,
+} from "../plugins/agentping/scripts/event-queue.mjs";
+import { drainCompletionQueue } from "../plugins/agentping/scripts/queue-worker.mjs";
+import { normalizeCompletionEvent } from "../plugins/agentping/scripts/adapter-sdk.mjs";
+import { openClawCompletionEvent } from "../integrations/openclaw/adapter.mjs";
+import { installRuntime, rollbackRuntime, runtimeStatus } from "./runtime-install.mjs";
+import {
+  hermesIntegrationStatus,
+  installHermesIntegration,
+  installOpenClawIntegration,
+  openClawIntegrationStatus,
+} from "./platform-integrations.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), "..");
@@ -47,9 +68,9 @@ const notifyScript = path.join(pluginRoot, "scripts", "pushdeer-notify.mjs");
 const command = process.argv[2] || "all";
 const flags = new Set(process.argv.slice(3));
 
-function test(name, fn) {
+async function test(name, fn) {
   try {
-    fn();
+    await fn();
     console.log(`OK ${name}`);
   } catch (error) {
     console.error(`FAIL ${name}: ${error?.message || String(error)}`);
@@ -194,6 +215,7 @@ function runEvent(workspace, notification, extraEnv = {}) {
         AGENTPING_CONFIG: workspace.configPath,
         AGENTPING_DRY_RUN: "1",
         AGENTPING_FINAL_WAIT_MS: "0",
+        AGENTPING_QUEUE_SYNC: "1",
         ...extraEnv,
       },
     },
@@ -265,6 +287,7 @@ function runClaudeEvent(workspace, hook, extraEnv = {}) {
       AGENTPING_CONFIG: workspace.configPath,
       AGENTPING_DRY_RUN: "1",
       AGENTPING_ALLOW_ANY_CLAUDE_TRANSCRIPT: "1",
+      AGENTPING_QUEUE_SYNC: "1",
       ...extraEnv,
     },
   });
@@ -292,10 +315,10 @@ function testFormatHelpers() {
     summaryMinChars: 50,
     summaryMaxChars: 100,
   });
-  assert.equal(documentedConfig.CodexPushKey, "codex-key");
-  assert.equal(documentedConfig.ClaudePushKey, "claude-key");
-  assert.equal(documentedConfig.CodexSummaryModel, "gpt-5.4-mini");
-  assert.equal(documentedConfig.ClaudeSummaryModel, "haiku");
+  assert.equal(documentedConfig.agents.codex.PushKey, "codex-key");
+  assert.equal(documentedConfig.agents.claude.PushKey, "claude-key");
+  assert.equal(documentedConfig.agents.codex.summaryModel, "gpt-5.4-mini");
+  assert.equal(documentedConfig.agents.claude.summaryModel, "haiku");
   assert.equal(documentedConfig.pushkey, undefined);
   assert.ok(Array.isArray(documentedConfig._说明));
   assert.ok(documentedConfig._说明.some((line) => /summaryMinChars.*Prompt/u.test(line)));
@@ -398,17 +421,20 @@ function testConfigFieldMigration() {
 
     saveConfigPatch({ summaryMaxChars: 90 });
     const stored = JSON.parse(fs.readFileSync(workspace.configPath, "utf8"));
-    assert.equal(stored.CodexPushKey, "legacy-codex-key");
-    assert.equal(stored.ClaudePushKey, "legacy-claude-key");
-    assert.equal(stored.CodexSummaryModel, "legacy-codex-model");
-    assert.equal(stored.ClaudeSummaryModel, "legacy-claude-model");
+    assert.equal(stored.configVersion, 2);
+    assert.equal(stored.agents.codex.PushKey, "legacy-codex-key");
+    assert.equal(stored.agents.claude.PushKey, "legacy-claude-key");
+    assert.equal(stored.agents.codex.summaryModel, "legacy-codex-model");
+    assert.equal(stored.agents.claude.summaryModel, "legacy-claude-model");
+    assert.equal(stored.agents.codex.summaryTimeoutMs, 16_000);
+    assert.equal(stored.agents.claude.summaryTimeoutMs, 16_000);
     assert.equal(stored.pushkey, undefined);
     assert.equal(stored.claudePushkey, undefined);
     assert.equal(stored.summaryModel, undefined);
     assert.equal(stored.claudeSummaryModel, undefined);
     assert.equal(stored.summaryMinChars__说明, undefined);
     assert.ok(Array.isArray(stored._说明));
-    assert.equal(stored.llmTimeoutMs, 16_000);
+    assert.equal(stored.llmTimeoutMs, undefined);
     assert.equal(stored.summaryFallbackText, "摘要未生成，请看原回答");
     assert.equal(stored.notifyMode, "long_only");
     assert.equal(stored.logMaxBytes, 2 * 1024 * 1024);
@@ -559,6 +585,12 @@ function testProjectConfigOverrides() {
     fs.writeFileSync(path.join(workspace.root, "project", ".agentping.json"), JSON.stringify({
       CodexPushKey: "project-should-not-win",
       ClaudePushKey: "project-claude-should-not-win",
+      agents: {
+        openclaw: {
+          PushKey: "project-openclaw-should-not-win",
+          summaryTimeoutMs: 4321,
+        },
+      },
       notifyMode: "long_only",
       minDurationMs: 12345,
       titleTemplate: "项目 {summary}",
@@ -566,6 +598,13 @@ function testProjectConfigOverrides() {
     fs.writeFileSync(workspace.configPath, JSON.stringify({
       CodexPushKey: "user-key",
       ClaudePushKey: "user-claude-key",
+      agents: {
+        openclaw: {
+          type: "openclaw",
+          PushKey: "user-openclaw-key",
+          summaryTimeoutMs: 16000,
+        },
+      },
       notifyMode: "always",
       minDurationMs: 30000,
     }, null, 2));
@@ -579,6 +618,9 @@ function testProjectConfigOverrides() {
     assert.equal(config.minDurationMs, 12345);
     assert.equal(config.titleTemplate, "项目 {summary}");
     assert.ok(config.projectConfigPath.endsWith(".agentping.json"));
+    const openClawConfig = loadConfig({ cwd: projectDir, agentId: "openclaw", agentType: "openclaw" });
+    assert.equal(openClawConfig.agentPushKey, "user-openclaw-key");
+    assert.equal(openClawConfig.agentSummaryTimeoutMs, 4321);
   } finally {
     if (previousConfig === undefined) delete process.env.AGENTPING_CONFIG;
     else process.env.AGENTPING_CONFIG = previousConfig;
@@ -814,6 +856,112 @@ function testLogRotation() {
   }
 }
 
+async function testQueueConcurrencyAndRecovery() {
+  const workspace = makeTempWorkspace();
+  const previousConfig = process.env.AGENTPING_CONFIG;
+  const previousStateDir = process.env.AGENTPING_STATE_DIR;
+  const previousDryRun = process.env.AGENTPING_DRY_RUN;
+  const previousDisableSummary = process.env.AGENTPING_DISABLE_LLM_SUMMARY;
+  try {
+    process.env.AGENTPING_CONFIG = workspace.configPath;
+    process.env.AGENTPING_STATE_DIR = workspace.stateDir;
+    process.env.AGENTPING_DRY_RUN = "1";
+    process.env.AGENTPING_DISABLE_LLM_SUMMARY = "1";
+
+    enqueueCompletionEvent({
+      agentId: "codex",
+      agentType: "codex",
+      eventId: "queue-codex",
+      sessionId: "queue-codex-session",
+      status: "success",
+      finalText: "Codex 队列并发测试已完成。",
+      durationMs: 12_000,
+      cwd: workspace.cwd,
+    });
+    enqueueCompletionEvent({
+      agentId: "claude",
+      agentType: "claude",
+      eventId: "queue-claude",
+      sessionId: "queue-claude-session",
+      status: "success",
+      finalText: "Claude 队列并发测试已完成。",
+      durationMs: 13_000,
+      cwd: workspace.cwd,
+    });
+    assert.equal(queueStatus().ready, 2);
+    assert.equal(acquireQueueLock(), true);
+    assert.equal(acquireQueueLock(), false);
+    releaseQueueLock();
+
+    const firstRun = await drainCompletionQueue();
+    assert.equal(firstRun.acquired, true);
+    assert.equal(firstRun.processed, 2);
+    assert.equal(firstRun.failed, 0);
+    assert.deepEqual(queueStatus(), { ready: 0, processing: 0, failed: 0, locked: false });
+
+    enqueueCompletionEvent({
+      agentId: "codex",
+      agentType: "codex",
+      eventId: "queue-recovery",
+      sessionId: "queue-recovery-session",
+      status: "success",
+      finalText: "队列处理中断恢复测试已完成。",
+      durationMs: 14_000,
+      cwd: workspace.cwd,
+    });
+    const paths = queuePaths();
+    const queuedFile = fs.readdirSync(paths.ready).find((name) => name.endsWith(".json"));
+    fs.renameSync(path.join(paths.ready, queuedFile), path.join(paths.processing, queuedFile));
+    const recoveryRun = await drainCompletionQueue();
+    assert.equal(recoveryRun.processed, 1);
+    assert.deepEqual(queueStatus(), { ready: 0, processing: 0, failed: 0, locked: false });
+
+    const sentCount = readLog(workspace).split("PushDeer notify event sent").length - 1;
+    assert.equal(sentCount, 3);
+  } finally {
+    if (previousConfig === undefined) delete process.env.AGENTPING_CONFIG;
+    else process.env.AGENTPING_CONFIG = previousConfig;
+    if (previousStateDir === undefined) delete process.env.AGENTPING_STATE_DIR;
+    else process.env.AGENTPING_STATE_DIR = previousStateDir;
+    if (previousDryRun === undefined) delete process.env.AGENTPING_DRY_RUN;
+    else process.env.AGENTPING_DRY_RUN = previousDryRun;
+    if (previousDisableSummary === undefined) delete process.env.AGENTPING_DISABLE_LLM_SUMMARY;
+    else process.env.AGENTPING_DISABLE_LLM_SUMMARY = previousDisableSummary;
+    cleanupTempWorkspace(workspace);
+  }
+}
+
+function testFailedQueueRetry() {
+  const workspace = makeTempWorkspace();
+  const previousStateDir = process.env.AGENTPING_STATE_DIR;
+  process.env.AGENTPING_STATE_DIR = workspace.stateDir;
+  try {
+    enqueueCompletionEvent({
+      agentId: "hermes",
+      agentType: "hermes",
+      eventId: "retry-event",
+      finalText: "需要重试的完整回答。",
+      durationMs: 20_000,
+    });
+    const claim = claimNextEvent();
+    assert.ok(claim);
+    failClaim(claim, new Error("delivery failed for PDU12345678901234567890"));
+    const failedFile = fs.readdirSync(queuePaths().failed)[0];
+    const failed = JSON.parse(fs.readFileSync(path.join(queuePaths().failed, failedFile), "utf8"));
+    assert.equal(failed.event.finalText, "需要重试的完整回答。");
+    assert.doesNotMatch(failed.error, /PDU123/u);
+    assert.equal(requeueFailedEvents(), 1);
+    const retried = claimNextEvent();
+    assert.equal(retried.envelope.attempts, 1);
+    completeClaim(retried);
+    assert.deepEqual(queueStatus(), { ready: 0, processing: 0, failed: 0, locked: false });
+  } finally {
+    if (previousStateDir === undefined) delete process.env.AGENTPING_STATE_DIR;
+    else process.env.AGENTPING_STATE_DIR = previousStateDir;
+    cleanupTempWorkspace(workspace);
+  }
+}
+
 function testLegacyEnvCompatibility() {
   const workspace = makeTempWorkspace();
   const previousAgentConfig = process.env.AGENTPING_CONFIG;
@@ -897,7 +1045,112 @@ function testNotifyConfigHelpers() {
     legacyPathFragments,
   });
   assert.equal(status.ok, true);
-  assert.equal(status.detail, "notify wrapper delegates to this checkout");
+  assert.equal(status.detail, "notify wrapper delegates to the configured AgentPing runtime");
+}
+
+function testAdapterSdkAndOpenClaw() {
+  const extracted = openClawCompletionEvent({
+    success: true,
+    durationMs: 12_345,
+    model: "test-model",
+    messages: [
+      { role: "user", content: [{ type: "text", text: "请完成测试" }] },
+      { role: "assistant", content: [{ type: "text", text: "中间过程" }] },
+      { role: "assistant", content: [{ type: "text", text: "测试已经完成。" }] },
+    ],
+  }, { sessionId: "openclaw-session", cwd: "/tmp/openclaw" });
+  const event = normalizeCompletionEvent(extracted);
+  assert.equal(event.agentId, "openclaw");
+  assert.equal(event.sessionId, "openclaw-session");
+  assert.equal(event.userText, "请完成测试");
+  assert.equal(event.finalText, "测试已经完成。");
+  assert.equal(event.durationMs, 12_345);
+  assert.equal(event.status, "success");
+  assert.throws(() => normalizeCompletionEvent({ agentType: "openclaw" }), /finalText/u);
+  assert.equal(pushkeyForPlatform({ pushkey: "codex-only" }, "openclaw"), "");
+  assert.equal(pushkeyForPlatform({ pushkey: "codex-only" }, "hermes"), "");
+}
+
+function testHermesPluginHooks() {
+  const script = [
+    "import importlib.util, json",
+    `spec=importlib.util.spec_from_file_location('agentping_hermes', ${JSON.stringify(path.join(projectRoot, "integrations", "hermes", "__init__.py"))})`,
+    "module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)",
+    "hooks={}",
+    "class Context:",
+    " def register_hook(self, name, callback): hooks[name]=callback",
+    "module.register(Context())",
+    "captured=[]",
+    "module._ingest_script=lambda: type('P', (), {'is_file': lambda self: True})()",
+    "module.subprocess.Popen=lambda args, **kwargs: captured.append(json.loads(args[2]))",
+    "hooks['pre_llm_call'](session_id='hermes-session')",
+    "hooks['post_llm_call'](session_id='hermes-session', user_message='执行测试', assistant_response='Hermes 测试完成。', model='test-model', platform='cli')",
+    "print(json.dumps({'hooks': sorted(hooks), 'event': captured[0]}, ensure_ascii=False))",
+  ].join("\n");
+  const result = spawnSync("python3", ["-c", script], { encoding: "utf8", stdio: "pipe" });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.hooks, ["post_llm_call", "pre_llm_call"]);
+  assert.equal(output.event.agentId, "hermes");
+  assert.equal(output.event.sessionId, "hermes-session");
+  assert.equal(output.event.finalText, "Hermes 测试完成。");
+  assert.ok(output.event.durationMs >= 0);
+}
+
+function testRuntimeInstallAndRollback() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agentping-runtime-test-"));
+  const previous = process.env.AGENTPING_RUNTIME_DIR;
+  process.env.AGENTPING_RUNTIME_DIR = path.join(root, "runtime");
+  try {
+    installRuntime({ projectRoot, version: "0.5.9-test" });
+    installRuntime({ projectRoot, version: "0.6.0-test" });
+    assert.equal(runtimeStatus().currentVersion, "0.6.0-test");
+    assert.equal(runtimeStatus().previousVersion, "0.5.9-test");
+    const rolledBack = rollbackRuntime();
+    assert.equal(rolledBack.version, "0.5.9-test");
+    assert.equal(runtimeStatus().currentVersion, "0.5.9-test");
+    assert.ok(fs.existsSync(path.join(runtimeStatus().resolvedPath, "plugins", "agentping", "scripts", "agentping-ingest.mjs")));
+  } finally {
+    if (previous === undefined) delete process.env.AGENTPING_RUNTIME_DIR;
+    else process.env.AGENTPING_RUNTIME_DIR = previous;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function testPlatformIntegrationInstallers() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agentping-platform-test-"));
+  const previousPath = process.env.PATH;
+  const previousHermesDir = process.env.HERMES_PLUGIN_DIR;
+  const binDir = path.join(root, "bin");
+  const commandLog = path.join(root, "openclaw.log");
+  fs.mkdirSync(binDir, { recursive: true });
+  const openClawStub = path.join(binDir, "openclaw");
+  fs.writeFileSync(openClawStub, [
+    "#!/bin/sh",
+    `printf '%s\\n' \"$*\" >> ${JSON.stringify(commandLog)}`,
+    "if [ \"$1 $2\" = \"plugins list\" ]; then echo 'agentping installed'; fi",
+    "exit 0",
+  ].join("\n"), { mode: 0o755 });
+  process.env.PATH = `${binDir}:${previousPath}`;
+  process.env.HERMES_PLUGIN_DIR = path.join(root, "hermes-plugins", "agentping");
+  try {
+    const openClaw = installOpenClawIntegration({ runtimeRoot: projectRoot });
+    assert.equal(openClaw.installed, true);
+    assert.equal(openClawIntegrationStatus().installed, true);
+    const calls = fs.readFileSync(commandLog, "utf8");
+    assert.match(calls, /plugins install/u);
+    assert.match(calls, /allowConversationAccess true/u);
+
+    const hermes = installHermesIntegration({ runtimeRoot: projectRoot });
+    assert.equal(hermes.installed, true);
+    assert.equal(hermesIntegrationStatus().installed, true);
+    assert.ok(fs.existsSync(path.join(process.env.HERMES_PLUGIN_DIR, "__init__.py")));
+  } finally {
+    process.env.PATH = previousPath;
+    if (previousHermesDir === undefined) delete process.env.HERMES_PLUGIN_DIR;
+    else process.env.HERMES_PLUGIN_DIR = previousHermesDir;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }
 
 function testPushReal() {
@@ -922,34 +1175,46 @@ const tests = {
   summary: () => test("LLM summary is used whole", testLlmSummaryIsUsedWhole),
   summary_fallback: () => test("invalid LLM summary uses fixed fallback", testInvalidLlmSummaryUsesFixedFallback),
   logs: () => test("log rotation", testLogRotation),
+  queue: () => test("concurrent queue and recovery", testQueueConcurrencyAndRecovery),
+  queue_retry: () => test("failed queue retry", testFailedQueueRetry),
   legacy: () => test("legacy env compatibility", testLegacyEnvCompatibility),
   project: () => test("project config overrides", testProjectConfigOverrides),
   notify: () => test("notify config helpers", testNotifyConfigHelpers),
   claude_hooks: () => test("Claude hook config helpers", testClaudeHookConfigHelpers),
   claude_stop: () => test("Claude Stop notification", testClaudeStopNotification),
   claude_modes: () => test("Claude modes and failure", testClaudeModesAndFailure),
+  adapters: () => test("Adapter SDK and OpenClaw event", testAdapterSdkAndOpenClaw),
+  hermes: () => test("Hermes plugin hooks", testHermesPluginHooks),
+  runtime: () => test("runtime install and rollback", testRuntimeInstallAndRollback),
+  platform_install: () => test("platform integration installers", testPlatformIntegrationInstallers),
   claude_live: () => test(flags.has("--real") ? "real Claude notification" : "Claude live dry-run", testClaudeLive),
   push: () => test(flags.has("--real") ? "real PushDeer push" : "dry-run PushDeer push", flags.has("--real") ? testPushReal : testPushDryRun),
 };
 
 if (command === "all") {
-  tests.format();
-  tests.config_migration();
-  tests.final();
-  tests.summary();
-  tests.summary_fallback();
-  tests.logs();
-  tests.legacy();
-  tests.project();
-  tests.notify();
-  tests.claude_hooks();
-  tests.claude_stop();
-  tests.claude_modes();
-  tests.push();
+  await tests.format();
+  await tests.config_migration();
+  await tests.final();
+  await tests.summary();
+  await tests.summary_fallback();
+  await tests.logs();
+  await tests.queue();
+  await tests.queue_retry();
+  await tests.legacy();
+  await tests.project();
+  await tests.notify();
+  await tests.claude_hooks();
+  await tests.claude_stop();
+  await tests.claude_modes();
+  await tests.adapters();
+  await tests.hermes();
+  await tests.runtime();
+  await tests.platform_install();
+  await tests.push();
 } else if (tests[command]) {
-  tests[command]();
+  await tests[command]();
 } else {
-  console.error("Usage: agentping test [all|format|config_migration|final|summary|summary_fallback|logs|legacy|project|notify|claude_hooks|claude_stop|claude_modes|claude_live|push] [--real]");
+  console.error("Usage: agentping test [all|format|config_migration|final|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
   process.exit(2);
 }
 

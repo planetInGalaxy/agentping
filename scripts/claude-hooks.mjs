@@ -95,7 +95,7 @@ export function claudeHookStatus(settings, { notifyScript } = {}) {
   return {
     ok,
     detail: ok
-      ? "Stop and StopFailure hooks point at this checkout"
+      ? "Stop and StopFailure hooks point at the configured AgentPing runtime"
       : `managed hook counts ${CLAUDE_HOOK_EVENTS.map((event) => `${event}:${details[event]}`).join(", ")}`,
   };
 }

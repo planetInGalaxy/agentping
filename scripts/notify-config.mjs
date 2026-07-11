@@ -249,7 +249,7 @@ export function notifyConfigStatus(contents, {
   if (commandEquals(target.command, desiredCommand) || commandTargetsScript(target.command, notifyScript)) {
     return {
       ok: true,
-      detail: "notify points at this checkout",
+      detail: "notify points at the configured AgentPing runtime",
     };
   }
 
@@ -265,7 +265,7 @@ export function notifyConfigStatus(contents, {
     if (commandEquals(previous.command, desiredCommand) || commandTargetsScript(previous.command, notifyScript)) {
       return {
         ok: true,
-        detail: "notify wrapper delegates to this checkout",
+        detail: "notify wrapper delegates to the configured AgentPing runtime",
       };
     }
 

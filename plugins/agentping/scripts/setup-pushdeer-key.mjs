@@ -10,15 +10,12 @@ import {
   parseArgs,
   readStdin,
   saveConfigPatch,
+  saveAgentConfigPatch,
   sendPushDeer,
 } from "./pushdeer-lib.mjs";
 
 const args = parseArgs();
-const platform = String(args.platform || "codex").trim().toLowerCase();
-if (!new Set(["codex", "claude"]).has(platform)) {
-  console.error("platform must be codex or claude");
-  process.exit(2);
-}
+const platform = String(args.agent || args.platform || "codex").trim().toLowerCase();
 
 async function promptHidden(question) {
   if (!input.isTTY || typeof input.setRawMode !== "function") {
@@ -92,6 +89,14 @@ if (args.show) {
     endpoint: config.endpoint || DEFAULT_ENDPOINT,
     hasCodexPushKey: Boolean(config.pushkey),
     hasClaudePushKey: Boolean(config.claudePushkey),
+    agents: Object.fromEntries(Object.entries(config.agents || {}).map(([agentId, agent]) => [agentId, {
+      type: agent.type || agentId,
+      enabled: agent.enabled !== false,
+      hasPushKey: Boolean(agent.PushKey),
+      summaryProvider: agent.summaryProvider,
+      summaryModel: agent.summaryModel,
+      summaryTimeoutMs: agent.summaryTimeoutMs,
+    }])),
     CodexSummaryModel: config.summaryModel,
     ClaudeSummaryModel: config.claudeSummaryModel,
     summaryMinChars: config.summaryMinChars,
@@ -116,10 +121,8 @@ if (args.show) {
 }
 
 if (args.unset) {
-  const patch = platform === "claude"
-    ? { ClaudePushKey: undefined }
-    : { CodexPushKey: undefined };
-  saveConfigPatch({ ...patch, endpoint: args.endpoint || DEFAULT_ENDPOINT });
+  if (args.endpoint) saveConfigPatch({ endpoint: args.endpoint });
+  saveAgentConfigPatch(platform, { PushKey: undefined }, { agentType: platform });
   console.log(`Removed stored ${platform} PushDeer key from ${configPath()}`);
   process.exit(0);
 }
@@ -131,10 +134,8 @@ if (!key) {
 }
 
 const endpoint = args.endpoint || DEFAULT_ENDPOINT;
-saveConfigPatch({
-  [platform === "claude" ? "ClaudePushKey" : "CodexPushKey"]: key,
-  endpoint,
-});
+saveConfigPatch({ endpoint });
+saveAgentConfigPatch(platform, { PushKey: key }, { agentType: platform });
 
 console.log(`Saved ${platform} PushDeer config to ${configPath()}`);
 

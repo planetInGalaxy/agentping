@@ -38,18 +38,22 @@ import {
   notifyCommandForScript,
   notifyConfigStatus,
 } from "./notify-config.mjs";
+import { queueStatus } from "../plugins/agentping/scripts/event-queue.mjs";
+import { hermesIntegrationStatus, openClawIntegrationStatus } from "./platform-integrations.mjs";
+import { runtimeCurrentPath, runtimeStatus } from "./runtime-install.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), "..");
+const runtimeRoot = runtimeCurrentPath();
 const notifyScript = path.join(
-  projectRoot,
+  runtimeRoot,
   "plugins",
   "agentping",
   "scripts",
   "pushdeer-notify-event.mjs",
 );
 const claudeNotifyScript = path.join(
-  projectRoot,
+  runtimeRoot,
   "plugins",
   "agentping",
   "scripts",
@@ -212,7 +216,21 @@ const config = loadConfig();
 const modelSelection = chooseSummaryModel({ preferredModel: config.summaryModel });
 const codexCommand = checkCommand("codex");
 const claudeCommand = checkCommand("claude");
-const hasSupportedAgent = codexCommand.ok || claudeCommand.ok;
+const openClaw = openClawIntegrationStatus();
+const hermes = hermesIntegrationStatus();
+const installedAgents = {
+  codex: codexCommand.ok,
+  claude: claudeCommand.ok,
+  openclaw: openClaw.available,
+  hermes: hermes.available,
+};
+const hasSupportedAgent = Object.values(installedAgents).some(Boolean);
+const loadedAgents = Object.fromEntries(Object.keys(installedAgents).map((agentId) => [
+  agentId,
+  loadConfig({ agentId, agentType: agentId }),
+]));
+const runtime = runtimeStatus();
+const queue = queueStatus();
 const checks = {
   node: checkCommand("node"),
   codex: codexCommand.ok
@@ -221,15 +239,24 @@ const checks = {
   claude: claudeCommand.ok
     ? claudeCommand
     : { ok: hasSupportedAgent, detail: "not installed (optional when Codex is available)" },
+  openclaw: { ok: !openClaw.available || openClaw.installed, detail: openClaw.detail },
+  hermes: { ok: !hermes.available || hermes.installed, detail: hermes.detail },
+  runtime: {
+    ok: runtime.installed,
+    detail: runtime.installed
+      ? `${runtime.currentVersion} at ${runtime.currentPath}${runtime.previousVersion ? `, rollback ${runtime.previousVersion}` : ""}`
+      : "not installed",
+  },
   marketplace: codexCommand.ok ? marketplaceStatus() : { ok: true, detail: "skipped without Codex" },
   plugin: codexCommand.ok ? pluginStatus() : { ok: true, detail: "skipped without Codex" },
   notify: codexCommand.ok ? notifyStatus() : { ok: true, detail: "skipped without Codex" },
   claudeHooks: claudeCommand.ok ? claudeHooksStatus() : { ok: true, detail: "skipped without Claude Code" },
   legacyShim: legacyShimStatus(),
   agentpingConfig: {
-    ok: (codexCommand.ok ? Boolean(config.pushkey) : true) &&
-      (claudeCommand.ok ? Boolean(config.claudePushkey) : true),
-    detail: `${agentpingConfigPath()} Codex key ${config.pushkey ? "configured" : "missing"}, Claude key ${config.claudePushkey ? "configured" : "missing"}; source ${configSourcePath()}`,
+    ok: Object.entries(installedAgents).every(([agentId, installed]) =>
+      !installed || Boolean(loadedAgents[agentId].agentPushKey)),
+    detail: `${agentpingConfigPath()} ${Object.entries(loadedAgents).map(([agentId, value]) =>
+      `${agentId} key ${value.agentPushKey ? "configured" : "missing"}`).join(", ")}; source ${configSourcePath()}`,
   },
   summaryModel: {
     ok: codexCommand.ok ? Boolean(modelSelection.model) : true,
@@ -288,6 +315,10 @@ const checks = {
     detail: config.projectConfigPath || "none",
   },
   notifierLog: logStatus(),
+  queue: {
+    ok: queue.failed === 0,
+    detail: `ready ${queue.ready}, processing ${queue.processing}, failed ${queue.failed}`,
+  },
 };
 
 const summary = {

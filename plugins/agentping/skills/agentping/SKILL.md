@@ -1,11 +1,11 @@
 ---
 name: agentping
-description: Configure, test, or troubleshoot AgentPing completion notifications for Codex and Claude Code. Use when the user asks about AgentPing setup, PushDeer notification setup, automatic completion summaries, platform-specific keys, or manual dry-run tests.
+description: Configure, test, or troubleshoot AgentPing completion notifications for Codex, Claude Code, OpenClaw, and Hermes. Use when the user asks about AgentPing setup, PushDeer notification setup, automatic completion summaries, platform-specific keys, or manual dry-run tests.
 ---
 
 # AgentPing
 
-Use this skill to configure or manually test the local AgentPing notifier. AgentPing sends Codex and Claude Code completion summaries through separate PushDeer keys.
+Use this skill to configure or manually test the local AgentPing notifier. AgentPing sends Codex, Claude Code, OpenClaw, and Hermes completion summaries through separate PushDeer keys.
 
 Resolve command paths relative to this plugin directory. Do not hard-code a developer machine path.
 

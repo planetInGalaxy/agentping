@@ -15,3 +15,5 @@ sent.json
 # Codex local caches.
 .codex/
 .tmp/
+__pycache__/
+*.py[cod]

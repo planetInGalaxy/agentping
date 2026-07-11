@@ -30,17 +30,50 @@ export const CODEX_SUMMARY_PROVIDER = "agentping-openai";
 export const CODEX_SUMMARY_BASE_URL = "https://chatgpt.com/backend-api/codex";
 export const NOTIFY_MODES = ["always", "long_only", "errors_only", "off"];
 export const PROJECT_CONFIG_FILES = [".agentping.json", "agentping.config.json"];
+export const CONFIG_VERSION = 2;
+
+export const DEFAULT_AGENT_CONFIGS = {
+  codex: {
+    type: "codex",
+    enabled: true,
+    PushKey: undefined,
+    summaryProvider: "codex",
+    summaryModel: DEFAULT_SUMMARY_MODEL,
+    summaryTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
+  },
+  claude: {
+    type: "claude",
+    enabled: true,
+    PushKey: undefined,
+    summaryProvider: "claude",
+    summaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
+    summaryTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
+  },
+  openclaw: {
+    type: "openclaw",
+    enabled: true,
+    PushKey: undefined,
+    summaryProvider: "codex",
+    summaryModel: DEFAULT_SUMMARY_MODEL,
+    summaryTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
+  },
+  hermes: {
+    type: "hermes",
+    enabled: true,
+    PushKey: undefined,
+    summaryProvider: "codex",
+    summaryModel: DEFAULT_SUMMARY_MODEL,
+    summaryTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
+  },
+};
 
 const DEFAULT_STORED_CONFIG = {
-  CodexPushKey: undefined,
-  ClaudePushKey: undefined,
+  configVersion: CONFIG_VERSION,
   endpoint: DEFAULT_ENDPOINT,
-  CodexSummaryModel: DEFAULT_SUMMARY_MODEL,
-  ClaudeSummaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
+  agents: DEFAULT_AGENT_CONFIGS,
   summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
   summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
   summaryFallbackText: DEFAULT_SUMMARY_FALLBACK_TEXT,
-  llmTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
   despMaxChars: DEFAULT_DESP_MAX_CHARS,
   despSeparator: DEFAULT_DESP_SEPARATOR,
   finalWaitMs: DEFAULT_FINAL_WAIT_MS,
@@ -57,15 +90,12 @@ const DEFAULT_STORED_CONFIG = {
 };
 
 export const CONFIG_FIELD_COMMENTS = {
-  CodexPushKey: "Codex 专用 PushDeer 推送密钥；项目配置中的密钥会被忽略。",
-  ClaudePushKey: "Claude Code 专用 PushDeer 推送密钥；项目配置中的密钥会被忽略。",
+  configVersion: "AgentPing 配置结构版本，由程序自动迁移，请勿手动降低。",
   endpoint: "PushDeer 服务端的消息推送接口地址。",
-  CodexSummaryModel: "用于生成 Codex 通知摘要的模型。",
-  ClaudeSummaryModel: "用于生成 Claude Code 通知摘要的模型。",
+  agents: "各 Agent 实例的独立 Key、摘要 Provider、模型和超时配置。",
   summaryMinChars: "LLM 摘要期望的最少汉字数，会动态写入摘要 Prompt。",
   summaryMaxChars: "LLM 摘要期望的最多汉字数，会动态写入摘要 Prompt；为保证语句完整不会强制截断。",
   summaryFallbackText: "LLM 摘要超时、失败、为空或明显无效时使用的固定标题。",
-  llmTimeoutMs: "等待 LLM 生成摘要的最长毫秒数；超时后改用本地摘要。",
   despMaxChars: "PushDeer desp 正文的最大字符数，-1 表示不限制总长度，0 表示不发送 desp，正数最大允许 1000。",
   despSeparator: "摘要标题与原始回答正文之间使用的分隔符。",
   finalWaitMs: "收到 Codex 通知事件后，等待会话写入完整最终回答的最长毫秒数。",
@@ -81,27 +111,79 @@ export const CONFIG_FIELD_COMMENTS = {
   finalTextPreviewMarker: "{finalTextPreview} 省略中间内容时插入的标记。",
 };
 
-const STORED_CONFIG_ALIASES = {
-  CodexPushKey: ["pushkey", "pushKey", "pushdeerKey"],
-  ClaudePushKey: ["claudePushkey", "claudePushKey", "claude_pushkey"],
-  CodexSummaryModel: ["summaryModel", "summary_model"],
-  ClaudeSummaryModel: ["claudeSummaryModel", "claude_summary_model"],
+const LEGACY_AGENT_FIELDS = {
+  codex: {
+    PushKey: ["CodexPushKey", "pushkey", "pushKey", "pushdeerKey"],
+    summaryModel: ["CodexSummaryModel", "summaryModel", "summary_model"],
+  },
+  claude: {
+    PushKey: ["ClaudePushKey", "claudePushkey", "claudePushKey", "claude_pushkey"],
+    summaryModel: ["ClaudeSummaryModel", "claudeSummaryModel", "claude_summary_model"],
+  },
 };
 
-function canonicalizeStoredConfig(config) {
-  const output = { ...(config || {}) };
+function objectValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function cloneConfig(config) {
+  return JSON.parse(JSON.stringify(objectValue(config)));
+}
+
+function firstStoredValue(config, names) {
+  const name = names.find((item) => Object.prototype.hasOwnProperty.call(config, item));
+  return name ? config[name] : undefined;
+}
+
+function mergeAgents(...sources) {
+  const output = {};
+  for (const source of sources) {
+    for (const [agentId, value] of Object.entries(objectValue(source))) {
+      output[agentId] = { ...objectValue(output[agentId]), ...objectValue(value) };
+    }
+  }
+  return output;
+}
+
+function canonicalizeStoredConfig(config, { fillAgentDefaults = false } = {}) {
+  const output = cloneConfig(config);
   delete output._说明;
   for (const key of Object.keys(output)) {
     if (key.endsWith("__说明")) delete output[key];
   }
-  for (const [canonical, aliases] of Object.entries(STORED_CONFIG_ALIASES)) {
-    if (!Object.prototype.hasOwnProperty.call(output, canonical)) {
-      const alias = aliases.find((name) => Object.prototype.hasOwnProperty.call(output, name));
-      if (alias) output[canonical] = output[alias];
+
+  const explicitAgents = mergeAgents(output.agents);
+  const agents = mergeAgents(fillAgentDefaults ? DEFAULT_AGENT_CONFIGS : {}, explicitAgents);
+  for (const [agentId, fields] of Object.entries(LEGACY_AGENT_FIELDS)) {
+    const patch = {};
+    for (const [target, aliases] of Object.entries(fields)) {
+      const legacyValue = firstStoredValue(output, aliases);
+      if (legacyValue !== undefined && explicitAgents[agentId]?.[target] === undefined) patch[target] = legacyValue;
+      for (const alias of aliases) delete output[alias];
     }
-    for (const alias of aliases) delete output[alias];
+    if (Object.keys(patch).length > 0) agents[agentId] = { ...objectValue(agents[agentId]), ...patch };
   }
+  if (Object.prototype.hasOwnProperty.call(output, "llmTimeoutMs") || Object.prototype.hasOwnProperty.call(output, "llm_timeout_ms")) {
+    const timeout = output.llmTimeoutMs ?? output.llm_timeout_ms;
+    for (const agentId of ["codex", "claude"]) {
+      if (agents[agentId]?.summaryTimeoutMs === undefined) {
+        agents[agentId] = { ...objectValue(agents[agentId]), summaryTimeoutMs: timeout };
+      }
+    }
+  }
+  delete output.llmTimeoutMs;
+  delete output.llm_timeout_ms;
+  output.agents = agents;
+  if (fillAgentDefaults || output.configVersion !== undefined) output.configVersion = CONFIG_VERSION;
   return output;
+}
+
+function mergeStoredConfigs(...sources) {
+  const normalized = sources.map((source) => canonicalizeStoredConfig(source));
+  return {
+    ...normalized.reduce((result, source) => ({ ...result, ...source }), {}),
+    agents: mergeAgents(...normalized.map((source) => source.agents)),
+  };
 }
 
 export function configWithChineseComments(config) {
@@ -112,6 +194,14 @@ export function configWithChineseComments(config) {
   }
   for (const key of Object.keys(output)) {
     if (CONFIG_FIELD_COMMENTS[key]) comments.push(`${key}：${CONFIG_FIELD_COMMENTS[key]}`);
+  }
+  for (const [agentId, agent] of Object.entries(objectValue(output.agents))) {
+    comments.push(`agents.${agentId}.type：适配器类型，内置可选 codex、claude、openclaw、hermes。`);
+    comments.push(`agents.${agentId}.enabled：是否接收该 Agent 的完成事件并发送通知。`);
+    comments.push(`agents.${agentId}.PushKey：${agent.type || agentId} 专用 PushDeer Key；项目配置中的 Key 会被忽略。`);
+    comments.push(`agents.${agentId}.summaryProvider：生成摘要的后端，可选 codex、claude 或 none。`);
+    comments.push(`agents.${agentId}.summaryModel：该 Agent 通知使用的摘要模型。`);
+    comments.push(`agents.${agentId}.summaryTimeoutMs：该 Agent 等待摘要生成的最长毫秒数。`);
   }
   if (comments.length > 0) output._说明 = comments;
   return output;
@@ -313,64 +403,85 @@ export function safeJsonParse(raw) {
 
 function stripProjectSecrets(config) {
   if (!config || typeof config !== "object") return {};
-  const output = { ...config };
-  delete output.pushkey;
-  delete output.pushKey;
-  delete output.pushdeerKey;
-  delete output.CodexPushKey;
-  delete output.claudePushkey;
-  delete output.claudePushKey;
-  delete output.claude_pushkey;
-  delete output.ClaudePushKey;
+  const output = canonicalizeStoredConfig(config);
+  output.agents = Object.fromEntries(
+    Object.entries(objectValue(output.agents)).map(([agentId, agent]) => {
+      const sanitized = { ...objectValue(agent) };
+      delete sanitized.PushKey;
+      delete sanitized.pushKey;
+      delete sanitized.pushkey;
+      return [agentId, sanitized];
+    }),
+  );
   return output;
 }
 
 function rawConfigForCwd(cwd = process.cwd()) {
-  const userConfig = readJsonIfExists(configSourcePath(), {});
+  const userConfig = canonicalizeStoredConfig(readJsonIfExists(configSourcePath(), {}), { fillAgentDefaults: true });
   const projectPath = projectConfigSourcePath(cwd);
   const projectConfig = projectPath
     ? stripProjectSecrets(readJsonIfExists(projectPath, {}))
     : {};
   return {
-    config: {
-      ...userConfig,
-      ...projectConfig,
-    },
+    config: mergeStoredConfigs(userConfig, projectConfig),
     projectPath,
   };
 }
 
-export function loadConfig({ cwd = process.cwd() } = {}) {
+function resolveAgentConfig(agents, agentId, agentType = "") {
+  const stored = objectValue(agents?.[agentId]);
+  const type = String(stored.type || agentType || agentId || "codex").trim().toLowerCase();
+  const defaults = objectValue(DEFAULT_AGENT_CONFIGS[type]);
+  const summaryTimeoutMs = Number.parseInt(stored.summaryTimeoutMs ?? defaults.summaryTimeoutMs, 10);
+  const requestedProvider = String(stored.summaryProvider || defaults.summaryProvider || "codex").trim().toLowerCase();
+  const summaryProvider = ["codex", "claude", "none"].includes(requestedProvider)
+    ? requestedProvider
+    : String(defaults.summaryProvider || "codex");
+  return {
+    ...defaults,
+    ...stored,
+    type,
+    enabled: normalizeBoolean(stored.enabled ?? defaults.enabled, true),
+    PushKey: String(stored.PushKey || stored.pushKey || stored.pushkey || ""),
+    summaryProvider,
+    summaryModel: String(stored.summaryModel || defaults.summaryModel || DEFAULT_SUMMARY_MODEL).trim(),
+    summaryTimeoutMs: Number.isFinite(summaryTimeoutMs) && summaryTimeoutMs > 0
+      ? summaryTimeoutMs
+      : DEFAULT_LLM_TIMEOUT_MS,
+  };
+}
+
+function agentEnvPrefix(agentType) {
+  return String(agentType || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+}
+
+export function loadConfig({ cwd = process.cwd(), agentId = "codex", agentType = "" } = {}) {
   const { config, projectPath } = rawConfigForCwd(cwd);
+  const resolvedAgentId = String(agentId || agentType || "codex").trim().toLowerCase();
+  const agentConfig = resolveAgentConfig(config.agents, resolvedAgentId, agentType);
+  const envPrefix = agentEnvPrefix(agentConfig.type);
   const endpoint =
     envValue("AGENTPING_PUSHDEER_ENDPOINT", "AGENTPING_ENDPOINT", "PUSHDEER_ENDPOINT", "CODEX_PUSHDEER_ENDPOINT") ||
     config.pushdeerEndpoint ||
     config.endpoint ||
     DEFAULT_ENDPOINT;
+  const codexConfig = resolveAgentConfig(config.agents, "codex", "codex");
+  const claudeConfig = resolveAgentConfig(config.agents, "claude", "claude");
   const pushkey =
     envValue("AGENTPING_PUSHDEER_KEY", "AGENTPING_KEY", "PUSHDEER_KEY", "CODEX_PUSHDEER_KEY") ||
-    config.CodexPushKey ||
-    config.pushkey ||
-    config.pushKey ||
+    codexConfig.PushKey ||
     "";
   const claudePushkey =
     envValue("AGENTPING_CLAUDE_PUSHDEER_KEY", "CLAUDE_PUSHDEER_KEY") ||
-    config.ClaudePushKey ||
-    config.claudePushkey ||
-    config.claudePushKey ||
-    config.claude_pushkey ||
+    claudeConfig.PushKey ||
     "";
   const summaryModel =
     envValue("AGENTPING_SUMMARY_MODEL", "CODEX_PUSHDEER_SUMMARY_MODEL") ||
-    config.CodexSummaryModel ||
-    config.summaryModel ||
-    config.summary_model ||
+    codexConfig.summaryModel ||
     DEFAULT_SUMMARY_MODEL;
   const claudeSummaryModel =
     envValue("AGENTPING_CLAUDE_SUMMARY_MODEL") ||
-    config.ClaudeSummaryModel ||
-    config.claudeSummaryModel ||
-    config.claude_summary_model ||
+    claudeConfig.summaryModel ||
     DEFAULT_CLAUDE_SUMMARY_MODEL;
   const summaryMinChars = Number.parseInt(
     envValue("AGENTPING_SUMMARY_MIN_CHARS", "CODEX_PUSHDEER_SUMMARY_MIN_CHARS") ??
@@ -391,13 +502,20 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     config.summaryFallbackText ??
     config.summary_fallback_text ??
     DEFAULT_SUMMARY_FALLBACK_TEXT;
-  const llmTimeoutMs = Number.parseInt(
-    envValue("AGENTPING_LLM_TIMEOUT_MS", "CODEX_PUSHDEER_LLM_TIMEOUT_MS") ||
-      config.llmTimeoutMs ||
-      config.llm_timeout_ms ||
+  const agentSummaryTimeoutMs = Number.parseInt(
+    envValue(`AGENTPING_${envPrefix}_SUMMARY_TIMEOUT_MS`, "AGENTPING_LLM_TIMEOUT_MS", "CODEX_PUSHDEER_LLM_TIMEOUT_MS") ||
+      agentConfig.summaryTimeoutMs ||
       String(DEFAULT_LLM_TIMEOUT_MS),
     10,
   );
+  const agentPushKey =
+    envValue(`AGENTPING_${envPrefix}_PUSHDEER_KEY`) ||
+    (agentConfig.type === "codex" ? pushkey : agentConfig.type === "claude" ? claudePushkey : agentConfig.PushKey) ||
+    "";
+  const agentSummaryModel =
+    envValue(`AGENTPING_${envPrefix}_SUMMARY_MODEL`) ||
+    (agentConfig.type === "codex" ? summaryModel : agentConfig.type === "claude" ? claudeSummaryModel : agentConfig.summaryModel) ||
+    DEFAULT_SUMMARY_MODEL;
   const despMaxChars = Number.parseInt(
     envValue("AGENTPING_DESP_MAX_CHARS", "CODEX_PUSHDEER_DESP_MAX_CHARS") ??
       config.despMaxChars ??
@@ -480,7 +598,27 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
 
   return {
     ...config,
+    configVersion: CONFIG_VERSION,
+    agents: config.agents,
     projectConfigPath: projectPath,
+    agentId: resolvedAgentId,
+    agentType: agentConfig.type,
+    agentConfig: {
+      ...agentConfig,
+      PushKey: agentPushKey,
+      summaryProvider: envValue(`AGENTPING_${envPrefix}_SUMMARY_PROVIDER`) || agentConfig.summaryProvider,
+      summaryModel: agentSummaryModel,
+      summaryTimeoutMs: Number.isFinite(agentSummaryTimeoutMs) && agentSummaryTimeoutMs > 0
+        ? agentSummaryTimeoutMs
+        : DEFAULT_LLM_TIMEOUT_MS,
+    },
+    agentEnabled: agentConfig.enabled !== false,
+    agentPushKey,
+    agentSummaryProvider: envValue(`AGENTPING_${envPrefix}_SUMMARY_PROVIDER`) || agentConfig.summaryProvider,
+    agentSummaryModel,
+    agentSummaryTimeoutMs: Number.isFinite(agentSummaryTimeoutMs) && agentSummaryTimeoutMs > 0
+      ? agentSummaryTimeoutMs
+      : DEFAULT_LLM_TIMEOUT_MS,
     endpoint,
     pushkey,
     claudePushkey,
@@ -488,8 +626,8 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     claudeSummaryModel,
     ...summaryBounds,
     summaryFallbackText: normalizeTemplate(summaryFallbackText, DEFAULT_SUMMARY_FALLBACK_TEXT),
-    llmTimeoutMs: Number.isFinite(llmTimeoutMs) && llmTimeoutMs > 0
-      ? llmTimeoutMs
+    llmTimeoutMs: Number.isFinite(agentSummaryTimeoutMs) && agentSummaryTimeoutMs > 0
+      ? agentSummaryTimeoutMs
       : DEFAULT_LLM_TIMEOUT_MS,
     despMaxChars: normalizeDespMaxChars(despMaxChars),
     despSeparator: normalizeDespSeparator(despSeparator),
@@ -508,20 +646,44 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
 }
 
 export function pushkeyForPlatform(config, platform = "codex") {
-  return platform === "claude"
-    ? String(config?.claudePushkey || "")
-    : String(config?.pushkey || "");
+  if (config?.agentPushKey && (!platform || config.agentType === platform || config.agentId === platform)) {
+    return String(config.agentPushKey);
+  }
+  const agent = config?.agents?.[platform];
+  if (agent?.PushKey) return String(agent.PushKey);
+  if (platform === "codex") return String(config?.pushkey || "");
+  if (platform === "claude") return String(config?.claudePushkey || "");
+  return "";
 }
 
 export function saveConfigPatch(patch) {
   const current = readJsonIfExists(configPath(), null) ?? readJsonIfExists(configSourcePath(), {});
-  const canonicalCurrent = canonicalizeStoredConfig(current);
+  const canonicalCurrent = canonicalizeStoredConfig(current, { fillAgentDefaults: true });
   const canonicalPatch = canonicalizeStoredConfig(patch);
   writeJson0600(configPath(), configWithChineseComments({
-    ...DEFAULT_STORED_CONFIG,
-    ...canonicalCurrent,
-    ...canonicalPatch,
+    ...mergeStoredConfigs(DEFAULT_STORED_CONFIG, canonicalCurrent, canonicalPatch),
+    configVersion: CONFIG_VERSION,
   }));
+}
+
+export function saveAgentConfigPatch(agentId, patch, { agentType = "" } = {}) {
+  const id = String(agentId || agentType || "").trim().toLowerCase();
+  if (!id) throw new Error("agentId is required");
+  const currentRaw = readJsonIfExists(configPath(), null) ?? readJsonIfExists(configSourcePath(), {});
+  const current = canonicalizeStoredConfig(currentRaw, { fillAgentDefaults: true });
+  const nextAgent = {
+    ...objectValue(current.agents?.[id]),
+    ...(agentType ? { type: agentType } : {}),
+  };
+  for (const [key, value] of Object.entries(objectValue(patch))) {
+    if (value === undefined) delete nextAgent[key];
+    else nextAgent[key] = value;
+  }
+  const next = mergeStoredConfigs(DEFAULT_STORED_CONFIG, {
+    ...current,
+    agents: { ...objectValue(current.agents), [id]: nextAgent },
+  });
+  writeJson0600(configPath(), configWithChineseComments({ ...next, configVersion: CONFIG_VERSION }));
 }
 
 export function hashText(value) {

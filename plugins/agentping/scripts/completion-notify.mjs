@@ -55,7 +55,12 @@ function copiedFinalAnswerReason(summary, finalText, summaryMaxChars) {
 }
 
 function summaryPrompt({ platform, summaryMinChars, summaryMaxChars }) {
-  const platformName = platform === "claude" ? "Claude Code" : "Codex";
+  const platformName = {
+    claude: "Claude Code",
+    codex: "Codex",
+    openclaw: "OpenClaw",
+    hermes: "Hermes Agent",
+  }[platform] || platform || "AI Agent";
   return [
     `你是 AI 编程助手完成通知摘要器。根据用户问题和 ${platformName} 最终回答，生成一条中文推送摘要。`,
     `期望长度：${summaryMinChars}到${summaryMaxChars}个汉字。`,
@@ -142,11 +147,15 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
     return { text: "", elapsedMs: 0, error: "disabled" };
   }
 
-  const model = platform === "claude"
+  const provider = config.agentSummaryProvider || (platform === "claude" ? "claude" : "codex");
+  if (provider === "none") return { text: "", elapsedMs: 0, error: "provider_none" };
+  const model = config.agentSummaryModel || (provider === "claude"
     ? config.claudeSummaryModel || DEFAULT_CLAUDE_SUMMARY_MODEL
-    : config.summaryModel || DEFAULT_SUMMARY_MODEL;
-  const timeoutMs = Number.isFinite(config.llmTimeoutMs) && config.llmTimeoutMs > 0
-    ? config.llmTimeoutMs
+    : config.summaryModel || DEFAULT_SUMMARY_MODEL);
+  const timeoutMs = Number.isFinite(config.agentSummaryTimeoutMs) && config.agentSummaryTimeoutMs > 0
+    ? config.agentSummaryTimeoutMs
+    : Number.isFinite(config.llmTimeoutMs) && config.llmTimeoutMs > 0
+      ? config.llmTimeoutMs
     : DEFAULT_LLM_TIMEOUT_MS;
   const prompt = summaryPrompt({
     platform,
@@ -159,7 +168,7 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
   const startedAt = Date.now();
 
   try {
-    const command = platform === "claude"
+    const command = provider === "claude"
       ? runClaudeSummary({ model, prompt, input, cwd, timeoutMs })
       : runCodexSummary({ model, outputFile, prompt, input, cwd, timeoutMs });
     const elapsedMs = Date.now() - startedAt;
@@ -167,6 +176,7 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
     if (result.status !== 0) {
       logEvent("warn", "LLM summary command failed", {
         platform,
+        summaryProvider: provider,
         model,
         status: result.status,
         signal: result.signal,
@@ -188,6 +198,7 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
     if (invalidReason) {
       logEvent("warn", "LLM summary rejected as invalid", {
         platform,
+        summaryProvider: provider,
         model,
         elapsedMs,
         inputChars: charLength(input),
@@ -201,6 +212,7 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
     }
     logEvent("info", "LLM summary generated", {
       platform,
+      summaryProvider: provider,
       model,
       elapsedMs,
       inputChars: charLength(input),
@@ -210,6 +222,7 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
     if (summaryChars < config.summaryMinChars || summaryChars > config.summaryMaxChars) {
       logEvent("info", "LLM summary outside configured length range", {
         platform,
+        summaryProvider: provider,
         model,
         summaryChars,
         summaryMinChars: config.summaryMinChars,
@@ -221,6 +234,7 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
     const elapsedMs = Date.now() - startedAt;
     logEvent("warn", "LLM summary command errored", {
       platform,
+      summaryProvider: provider,
       model,
       elapsedMs,
       error: error?.message || String(error),
@@ -247,6 +261,7 @@ export function notificationModeDecision(config, completion) {
 }
 
 export async function sendCompletionNotification({
+  agentId = "",
   platform,
   finalText,
   userText = "",
@@ -256,11 +271,17 @@ export async function sendCompletionNotification({
   durationMs = null,
   cwd = process.cwd(),
 } = {}) {
-  const config = loadConfig({ cwd });
+  const resolvedAgentId = agentId || platform;
+  const config = loadConfig({ cwd, agentId: resolvedAgentId, agentType: platform });
+  if (!config.agentEnabled) {
+    logEvent("info", "Skipping disabled AgentPing agent", { agentId: resolvedAgentId, platform });
+    return { sent: false, reason: "agent_disabled" };
+  }
   const decision = notificationModeDecision(config, { durationMs, terminalType });
   if (!decision.send) {
     logEvent("info", "Skipping PushDeer notify event by mode", {
       platform,
+      agentId: resolvedAgentId,
       sendId,
       notifyMode: config.notifyMode,
       minDurationMs: config.minDurationMs,
@@ -276,18 +297,16 @@ export async function sendCompletionNotification({
     return { sent: false, reason: "duplicate" };
   }
 
-  const pushkey = pushkeyForPlatform(config, platform);
+  const pushkey = config.agentPushKey || pushkeyForPlatform(config, resolvedAgentId);
   if (!pushkey) {
-    logEvent("warn", "Skipping PushDeer notify event without platform key", { platform, sendId });
+    logEvent("warn", "Skipping PushDeer notify event without agent key", { platform, agentId: resolvedAgentId, sendId });
     return { sent: false, reason: "missing_platform_key" };
   }
 
   const llmSummary = summarizeWithLlm({ platform, finalText, userText, config, cwd });
   const summarySource = llmSummary.text ? "llm" : "fallback";
   const summaryText = llmSummary.text || config.summaryFallbackText || DEFAULT_SUMMARY_FALLBACK_TEXT;
-  const summaryModel = platform === "claude"
-    ? config.claudeSummaryModel || DEFAULT_CLAUDE_SUMMARY_MODEL
-    : config.summaryModel || DEFAULT_SUMMARY_MODEL;
+  const summaryModel = config.agentSummaryModel || config.summaryModel || DEFAULT_SUMMARY_MODEL;
   const { title, desp } = formatNotificationFields({
     summary: summaryText,
     finalText,
@@ -310,6 +329,7 @@ export async function sendCompletionNotification({
   markSent(sendId);
   logEvent("info", "PushDeer notify event sent", {
     platform,
+    agentId: resolvedAgentId,
     sendId,
     ...logTextMeta("title", title, { config }),
     despChars: charLength(desp),

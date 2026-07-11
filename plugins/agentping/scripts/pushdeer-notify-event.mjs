@@ -8,10 +8,8 @@ import {
   logEvent,
   safeJsonParse,
 } from "./pushdeer-lib.mjs";
-import {
-  isInternalSummaryText,
-  sendCompletionNotification,
-} from "./completion-notify.mjs";
+import { isInternalSummaryText } from "./completion-notify.mjs";
+import { submitCompletionEvent } from "./submit-completion-event.mjs";
 
 function loadNotificationArg() {
   return safeJsonParse(process.argv[2] || "") || {};
@@ -66,14 +64,18 @@ async function main() {
   }
 
   const resolvedTurnId = sessionFinal.turnId || turnId;
-  const sendId = `codex:${resolvedTurnId || hashText(JSON.stringify(notification)).slice(0, 24)}`;
-  await sendCompletionNotification({
-    platform: "codex",
+  const eventIdentity = resolvedTurnId || hashText(JSON.stringify(notification)).slice(0, 24);
+  await submitCompletionEvent({
+    agentId: "codex",
+    agentType: "codex",
+    eventId: `codex-${eventIdentity}`,
+    sessionId: resolvedTurnId,
+    status: sessionFinal.terminalType === "task_complete" ? "success" : "failed",
     finalText: sessionFinal.finalText,
     userText: sessionFinal.userText || notificationInput,
-    sendId,
-    turnId: resolvedTurnId,
     terminalType: sessionFinal.terminalType,
+    startedAt: sessionFinal.startedTimestamp,
+    completedAt: sessionFinal.terminalTimestamp,
     durationMs: sessionFinal.durationMs,
     cwd: process.cwd(),
   });

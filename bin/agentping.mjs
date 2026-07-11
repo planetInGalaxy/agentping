@@ -12,9 +12,12 @@ const scripts = {
   install: "scripts/install.mjs",
   setup: "scripts/install.mjs",
   uninstall: "scripts/uninstall.mjs",
+  update: "scripts/update.mjs",
+  rollback: "scripts/update.mjs",
   doctor: "scripts/doctor.mjs",
   config: "scripts/config.mjs",
   logs: "scripts/logs.mjs",
+  queue: "scripts/queue.mjs",
   test: "scripts/test-notifier.mjs",
   "check-models": "scripts/check-models.mjs",
   models: "scripts/check-models.mjs",
@@ -26,11 +29,14 @@ if (command === "help" || command === "--help" || command === "-h") {
     "Usage: agentping <command> [options]",
     "",
     "Commands:",
-    "  install       Configure Codex and Claude Code completion notifications",
+    "  install       Configure supported agent completion notifications",
+    "  update        Install this package version and preserve configuration",
+    "  rollback      Switch back to the previously installed runtime",
     "  uninstall     Remove plugin and optional local config",
     "  doctor        Diagnose local AgentPing setup",
     "  config        Show or change PushDeer notifier config",
     "  logs          Show, tail, rotate, or clear notifier logs",
+    "  queue         Inspect, retry, or clear queued completion events",
     "  test          Run local notifier self-tests",
     "  check-models  Detect Codex summary model and optionally write config",
     "  validate      Validate plugin structure",
@@ -44,7 +50,8 @@ if (!script) {
   process.exit(2);
 }
 
-const result = spawnSync(process.execPath, [path.join(root, script), ...passthrough], {
+const scriptArgs = command === "rollback" ? ["rollback", ...passthrough] : passthrough;
+const result = spawnSync(process.execPath, [path.join(root, script), ...scriptArgs], {
   stdio: "inherit",
 });
 process.exit(result.status || 0);

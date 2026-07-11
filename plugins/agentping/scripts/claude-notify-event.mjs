@@ -9,11 +9,9 @@ import {
   readStdin,
   safeJsonParse,
 } from "./pushdeer-lib.mjs";
-import {
-  isInternalSummaryText,
-  sendCompletionNotification,
-} from "./completion-notify.mjs";
+import { isInternalSummaryText } from "./completion-notify.mjs";
 import { readClaudeTranscriptCompletion } from "./claude-transcript.mjs";
+import { submitCompletionEvent } from "./submit-completion-event.mjs";
 
 function allowedTranscriptPath(value) {
   if (!value) return "";
@@ -79,18 +77,21 @@ async function main() {
 
   const sessionId = String(hook.session_id || "unknown");
   const eventIdentity = transcript.assistantUuid || hashText(`${finalText}\n${errorText}`).slice(0, 24);
-  const sendId = `claude:${sessionId}:${failed ? `failure:${hook.error || "unknown"}:` : ""}${eventIdentity}`;
   const durationMs = transcript.durationMs ??
     (failed && Number.isFinite(transcript.userStartedAt)
       ? Math.max(0, Date.now() - transcript.userStartedAt)
       : null);
-  await sendCompletionNotification({
-    platform: "claude",
+  await submitCompletionEvent({
+    agentId: "claude",
+    agentType: "claude",
+    eventId: `claude-${sessionId}-${failed ? `failure-${hook.error || "unknown"}-` : ""}${eventIdentity}`,
+    sessionId,
+    status: failed ? "failed" : "success",
     finalText,
     userText: transcript.userText,
-    sendId,
-    turnId: sessionId,
     terminalType: failed ? "task_failed" : "task_complete",
+    startedAt: transcript.userStartedAt,
+    completedAt: transcript.assistantCompletedAt,
     durationMs,
     cwd: safeWorkingDirectory(hook.cwd),
   });

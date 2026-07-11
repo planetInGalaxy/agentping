@@ -6,6 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  claudeHookStatus,
+  installClaudeHooks,
+  removeClaudeHooks,
+} from "./claude-hooks.mjs";
+import {
   DEFAULT_DESP_TEMPLATE,
   DEFAULT_DESP_SEPARATOR,
   DEFAULT_TITLE_TEMPLATE,
@@ -22,6 +27,7 @@ import {
   logPath,
   normalizeNotifyMode,
   normalizeSummaryCharBounds,
+  pushkeyForPlatform,
 } from "../plugins/agentping/scripts/pushdeer-lib.mjs";
 import {
   notifyCommandForScript,
@@ -34,6 +40,8 @@ const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), "..");
 const pluginRoot = path.join(projectRoot, "plugins", "agentping");
 const eventScript = path.join(pluginRoot, "scripts", "pushdeer-notify-event.mjs");
+const claudeEventScript = path.join(pluginRoot, "scripts", "claude-notify-event.mjs");
+const claudeLauncherScript = path.join(pluginRoot, "scripts", "claude-notify-launcher.mjs");
 const notifyScript = path.join(pluginRoot, "scripts", "pushdeer-notify.mjs");
 const command = process.argv[2] || "all";
 const flags = new Set(process.argv.slice(3));
@@ -59,6 +67,8 @@ function makeTempWorkspace() {
   fs.mkdirSync(stateDir, { recursive: true });
   fs.mkdirSync(cwd, { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify({
+    pushkey: "test-codex-key",
+    claudePushkey: "test-claude-key",
     endpoint: "https://api2.pushdeer.com/message/push",
     summaryMinChars: 50,
     summaryMaxChars: 100,
@@ -193,6 +203,76 @@ function runEvent(workspace, notification, extraEnv = {}) {
   return result;
 }
 
+function writeClaudeTranscript(workspace, {
+  sessionId = "claude-session-test",
+  startedAt = "2026-07-08T09:00:00.000Z",
+  completedAt = "2026-07-08T09:00:12.500Z",
+  userText = "请让 Claude 完成这个任务并总结结果",
+  finalText = "Claude 已经完成任务，代码和测试均已验证通过。",
+} = {}) {
+  const transcriptPath = path.join(workspace.root, `${sessionId}.jsonl`);
+  const lines = [
+    {
+      type: "user",
+      userType: "external",
+      sessionId,
+      timestamp: startedAt,
+      uuid: `${sessionId}-user`,
+      message: { role: "user", content: [{ type: "text", text: userText }] },
+    },
+    {
+      type: "assistant",
+      sessionId,
+      timestamp: completedAt,
+      uuid: `${sessionId}-assistant`,
+      message: { role: "assistant", content: [{ type: "text", text: finalText }] },
+    },
+  ];
+  fs.writeFileSync(transcriptPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+  return transcriptPath;
+}
+
+function makeStubClaude(workspace, summary) {
+  const binDir = path.join(workspace.root, "claude-bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const stubPath = path.join(binDir, "claude");
+  const source = [
+    "#!/usr/bin/env node",
+    "const fs = require('node:fs');",
+    "const input = fs.readFileSync(0, 'utf8');",
+    "if (process.env.STUB_CLAUDE_CAPTURE) fs.writeFileSync(process.env.STUB_CLAUDE_CAPTURE, JSON.stringify({ args: process.argv.slice(2), input }));",
+    "process.stdout.write(process.env.STUB_CLAUDE_SUMMARY || '');",
+  ].join("\n");
+  fs.writeFileSync(stubPath, source, { mode: 0o755 });
+  return {
+    PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
+    STUB_CLAUDE_SUMMARY: summary,
+    STUB_CLAUDE_CAPTURE: path.join(workspace.root, "claude-capture.json"),
+  };
+}
+
+function runClaudeEvent(workspace, hook, extraEnv = {}) {
+  const result = spawnSync(process.execPath, [claudeEventScript], {
+    cwd: workspace.cwd,
+    input: JSON.stringify(hook),
+    stdio: ["pipe", "pipe", "pipe"],
+    encoding: "utf8",
+    timeout: 10_000,
+    env: {
+      ...process.env,
+      AGENTPING_STATE_DIR: workspace.stateDir,
+      AGENTPING_CONFIG: workspace.configPath,
+      AGENTPING_DRY_RUN: "1",
+      AGENTPING_ALLOW_ANY_CLAUDE_TRANSCRIPT: "1",
+      ...extraEnv,
+    },
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `Claude event script exited ${result.status}`);
+  }
+  return result;
+}
+
 function readLog(workspace) {
   const filePath = path.join(workspace.stateDir, "notifier.log");
   try {
@@ -209,6 +289,8 @@ function testFormatHelpers() {
   });
   assert.match(documentedConfig.summaryMinChars__说明, /Prompt/u);
   assert.match(documentedConfig.summaryMaxChars__说明, /不会强制截断/u);
+  assert.equal(pushkeyForPlatform({ pushkey: "codex-key", claudePushkey: "claude-key" }, "codex"), "codex-key");
+  assert.equal(pushkeyForPlatform({ pushkey: "codex-key", claudePushkey: "claude-key" }, "claude"), "claude-key");
   const { summaryMinChars, summaryMaxChars } = normalizeSummaryCharBounds(60, 30);
   assert.equal(summaryMinChars, 60);
   assert.equal(summaryMaxChars, 60);
@@ -378,12 +460,14 @@ function testProjectConfigOverrides() {
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(path.join(workspace.root, "project", ".agentping.json"), JSON.stringify({
       pushkey: "project-should-not-win",
+      claudePushkey: "project-claude-should-not-win",
       notifyMode: "long_only",
       minDurationMs: 12345,
       titleTemplate: "项目 {summary}",
     }, null, 2));
     fs.writeFileSync(workspace.configPath, JSON.stringify({
       pushkey: "user-key",
+      claudePushkey: "user-claude-key",
       notifyMode: "always",
       minDurationMs: 30000,
     }, null, 2));
@@ -392,6 +476,7 @@ function testProjectConfigOverrides() {
 
     const config = loadConfig({ cwd: projectDir });
     assert.equal(config.pushkey, "user-key");
+    assert.equal(config.claudePushkey, "user-claude-key");
     assert.equal(config.notifyMode, "long_only");
     assert.equal(config.minDurationMs, 12345);
     assert.equal(config.titleTemplate, "项目 {summary}");
@@ -401,6 +486,170 @@ function testProjectConfigOverrides() {
     else process.env.AGENTPING_CONFIG = previousConfig;
     if (previousProjectConfig === undefined) delete process.env.AGENTPING_PROJECT_CONFIG;
     else process.env.AGENTPING_PROJECT_CONFIG = previousProjectConfig;
+    cleanupTempWorkspace(workspace);
+  }
+}
+
+function testClaudeHookConfigHelpers() {
+  const original = {
+    theme: "dark",
+    hooks: {
+      Notification: [{ hooks: [{ type: "command", command: "notify-existing" }] }],
+      Stop: [{ hooks: [{ type: "command", command: "keep-existing-stop" }] }],
+    },
+  };
+  const installed = installClaudeHooks(original, {
+    notifyScript: claudeLauncherScript,
+    nodePath: "/test/node",
+  });
+  assert.equal(installed.changed, true);
+  assert.equal(installed.settings.theme, "dark");
+  assert.equal(installed.settings.hooks.Notification.length, 1);
+  assert.equal(installed.settings.hooks.Stop.length, 2);
+  assert.equal(installed.settings.hooks.StopFailure.length, 1);
+  assert.equal(claudeHookStatus(installed.settings, { notifyScript: claudeLauncherScript }).ok, true);
+
+  const reinstalled = installClaudeHooks(installed.settings, {
+    notifyScript: claudeLauncherScript,
+    nodePath: "/test/node",
+  });
+  assert.equal(reinstalled.changed, false);
+
+  const removed = removeClaudeHooks(installed.settings, { notifyScript: claudeLauncherScript });
+  assert.equal(removed.changed, true);
+  assert.equal(removed.settings.hooks.Notification.length, 1);
+  assert.equal(removed.settings.hooks.Stop.length, 1);
+  assert.equal(removed.settings.hooks.Stop[0].hooks[0].command, "keep-existing-stop");
+  assert.equal(removed.settings.hooks.StopFailure, undefined);
+}
+
+function testClaudeStopNotification() {
+  const workspace = makeTempWorkspace();
+  try {
+    const finalText = "Claude 已完成完整实现，保留了现有配置和使用方法，并完成了全部回归测试。";
+    const userText = "适配 Claude Code，并确保最终回答会发送独立通知。";
+    const transcriptPath = writeClaudeTranscript(workspace, { userText, finalText });
+    const summary = "Claude Code 通知适配已经完成，独立密钥、摘要、耗时判断和回归测试均正常。";
+    const stub = makeStubClaude(workspace, summary);
+    runClaudeEvent(workspace, {
+      session_id: "claude-session-test",
+      transcript_path: transcriptPath,
+      cwd: workspace.cwd,
+      hook_event_name: "Stop",
+      stop_hook_active: false,
+      last_assistant_message: finalText,
+    }, {
+      ...stub,
+      AGENTPING_DEBUG_LOGS: "1",
+    });
+
+    const log = readLog(workspace);
+    const capture = JSON.parse(fs.readFileSync(stub.STUB_CLAUDE_CAPTURE, "utf8"));
+    assert.match(log, /PushDeer notify event sent/u);
+    assert.match(log, /"platform":"claude"/u);
+    assert.match(log, /"durationMs":12500/u);
+    assert.match(log, new RegExp(summary, "u"));
+    assert.ok(capture.args.includes("--safe-mode"));
+    assert.ok(capture.args.includes("--no-session-persistence"));
+    assert.ok(capture.args.includes("haiku"));
+    assert.match(capture.input, new RegExp(userText, "u"));
+    assert.match(capture.input, new RegExp(finalText, "u"));
+  } finally {
+    cleanupTempWorkspace(workspace);
+  }
+}
+
+function testClaudeModesAndFailure() {
+  const shortWorkspace = makeTempWorkspace();
+  try {
+    const config = JSON.parse(fs.readFileSync(shortWorkspace.configPath, "utf8"));
+    fs.writeFileSync(shortWorkspace.configPath, JSON.stringify({
+      ...config,
+      notifyMode: "long_only",
+      minDurationMs: 10000,
+    }, null, 2));
+    const transcriptPath = writeClaudeTranscript(shortWorkspace, {
+      sessionId: "claude-short",
+      completedAt: "2026-07-08T09:00:05.000Z",
+    });
+    runClaudeEvent(shortWorkspace, {
+      session_id: "claude-short",
+      transcript_path: transcriptPath,
+      cwd: shortWorkspace.cwd,
+      hook_event_name: "Stop",
+      last_assistant_message: "五秒内完成。",
+    }, { AGENTPING_DISABLE_LLM_SUMMARY: "1" });
+    const log = readLog(shortWorkspace);
+    assert.match(log, /duration below threshold/u);
+    assert.doesNotMatch(log, /PushDeer notify event sent/u);
+  } finally {
+    cleanupTempWorkspace(shortWorkspace);
+  }
+
+  const failureWorkspace = makeTempWorkspace();
+  try {
+    const config = JSON.parse(fs.readFileSync(failureWorkspace.configPath, "utf8"));
+    fs.writeFileSync(failureWorkspace.configPath, JSON.stringify({
+      ...config,
+      notifyMode: "errors_only",
+    }, null, 2));
+    const transcriptPath = writeClaudeTranscript(failureWorkspace, {
+      sessionId: "claude-failure",
+      completedAt: "2026-07-08T09:00:02.000Z",
+    });
+    runClaudeEvent(failureWorkspace, {
+      session_id: "claude-failure",
+      transcript_path: transcriptPath,
+      cwd: failureWorkspace.cwd,
+      hook_event_name: "StopFailure",
+      error: "rate_limit",
+      error_details: "Rate limit reached",
+      last_assistant_message: "API Error: Rate limit reached",
+    }, { AGENTPING_DISABLE_LLM_SUMMARY: "1" });
+    const log = readLog(failureWorkspace);
+    assert.match(log, /PushDeer notify event sent/u);
+    assert.match(log, /"terminalType":"task_failed"/u);
+    assert.match(log, /"platform":"claude"/u);
+  } finally {
+    cleanupTempWorkspace(failureWorkspace);
+  }
+}
+
+function testClaudeLive() {
+  const workspace = makeTempWorkspace();
+  try {
+    const finalText = "AgentPing 的 Claude Code 通知适配已经完成真实链路验证。";
+    const transcriptPath = writeClaudeTranscript(workspace, {
+      sessionId: "claude-live-test",
+      userText: "请验证 Claude Code 的 AgentPing 完成通知。",
+      finalText,
+    });
+    const env = {
+      ...process.env,
+      AGENTPING_STATE_DIR: workspace.stateDir,
+      AGENTPING_ALLOW_ANY_CLAUDE_TRANSCRIPT: "1",
+    };
+    if (!flags.has("--real")) env.AGENTPING_DRY_RUN = "1";
+    const result = spawnSync(process.execPath, [claudeEventScript], {
+      cwd: workspace.cwd,
+      input: JSON.stringify({
+        session_id: "claude-live-test",
+        transcript_path: transcriptPath,
+        cwd: workspace.cwd,
+        hook_event_name: "Stop",
+        last_assistant_message: finalText,
+      }),
+      stdio: ["pipe", "pipe", "pipe"],
+      encoding: "utf8",
+      timeout: 30_000,
+      env,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const log = readLog(workspace);
+    assert.match(log, /PushDeer notify event sent/u);
+    assert.match(log, /"platform":"claude"/u);
+    assert.match(log, /"summarySource":"llm"/u);
+  } finally {
     cleanupTempWorkspace(workspace);
   }
 }
@@ -576,6 +825,10 @@ const tests = {
   legacy: () => test("legacy env compatibility", testLegacyEnvCompatibility),
   project: () => test("project config overrides", testProjectConfigOverrides),
   notify: () => test("notify config helpers", testNotifyConfigHelpers),
+  claude_hooks: () => test("Claude hook config helpers", testClaudeHookConfigHelpers),
+  claude_stop: () => test("Claude Stop notification", testClaudeStopNotification),
+  claude_modes: () => test("Claude modes and failure", testClaudeModesAndFailure),
+  claude_live: () => test(flags.has("--real") ? "real Claude notification" : "Claude live dry-run", testClaudeLive),
   push: () => test(flags.has("--real") ? "real PushDeer push" : "dry-run PushDeer push", flags.has("--real") ? testPushReal : testPushDryRun),
 };
 
@@ -587,11 +840,14 @@ if (command === "all") {
   tests.legacy();
   tests.project();
   tests.notify();
+  tests.claude_hooks();
+  tests.claude_stop();
+  tests.claude_modes();
   tests.push();
 } else if (tests[command]) {
   tests[command]();
 } else {
-  console.error("Usage: agentping test [all|format|final|summary|logs|legacy|notify|push] [--real]");
+  console.error("Usage: agentping test [all|format|final|summary|logs|legacy|project|notify|claude_hooks|claude_stop|claude_modes|claude_live|push] [--real]");
   process.exit(2);
 }
 

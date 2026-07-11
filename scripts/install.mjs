@@ -7,6 +7,7 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
 import {
+  DEFAULT_CLAUDE_SUMMARY_MODEL,
   DEFAULT_DESP_MAX_CHARS,
   DEFAULT_DESP_SEPARATOR,
   DEFAULT_DESP_TEMPLATE,
@@ -38,6 +39,12 @@ import {
   normalizeTemplate,
   saveConfigPatch,
 } from "../plugins/agentping/scripts/pushdeer-lib.mjs";
+import {
+  claudeSettingsPath,
+  installClaudeHooks,
+  readClaudeSettings,
+  writeClaudeSettings,
+} from "./claude-hooks.mjs";
 import { chooseSummaryModel } from "./model-utils.mjs";
 import {
   findTopLevelNotify,
@@ -49,6 +56,7 @@ const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), "..");
 const pluginRoot = path.join(projectRoot, "plugins", "agentping");
 const notifyScript = path.join(pluginRoot, "scripts", "pushdeer-notify-event.mjs");
+const claudeNotifyScript = path.join(pluginRoot, "scripts", "claude-notify-launcher.mjs");
 const legacyNotifyScript = path.join(
   projectRoot,
   "plugins",
@@ -135,6 +143,10 @@ function ensureCommand(command, versionArgs = ["--version"]) {
   }
 }
 
+function commandAvailable(command, versionArgs = ["--version"]) {
+  return spawnSync(command, versionArgs, { stdio: "ignore" }).status === 0;
+}
+
 async function confirm(question) {
   if (args.yes) return true;
   if (!input.isTTY) return false;
@@ -149,6 +161,10 @@ async function confirm(question) {
 }
 
 async function configureNotify() {
+  if (!commandAvailable("codex") || args["skip-codex"]) {
+    console.log("Skipped Codex notify configuration; Codex is unavailable or disabled.");
+    return;
+  }
   if (args["skip-notify"]) {
     console.log("Skipped Codex notify configuration.");
     return;
@@ -196,6 +212,32 @@ async function configureNotify() {
   fs.mkdirSync(path.dirname(configFile), { recursive: true });
   fs.writeFileSync(configFile, result.contents, "utf8");
   console.log(`Configured Codex notify in ${configFile}`);
+}
+
+function configureClaudeHooks() {
+  if (!commandAvailable("claude") || args["skip-claude"]) {
+    console.log("Skipped Claude hooks; Claude Code is unavailable or disabled.");
+    return;
+  }
+  const settingsFile = claudeSettingsPath();
+  let current;
+  try {
+    current = readClaudeSettings(settingsFile);
+  } catch (error) {
+    console.error(`Could not parse Claude settings at ${settingsFile}: ${error?.message || String(error)}`);
+    process.exit(2);
+  }
+  const result = installClaudeHooks(current, { notifyScript: claudeNotifyScript });
+  if (!result.changed) {
+    console.log(`Claude Stop hooks unchanged in ${settingsFile}`);
+    return;
+  }
+  if (args["dry-run"]) {
+    console.log(`[dry-run] configure Claude Stop and StopFailure hooks in ${settingsFile}`);
+    return;
+  }
+  writeClaudeSettings(settingsFile, result.settings);
+  console.log(`Configured Claude Stop and StopFailure hooks in ${settingsFile}`);
 }
 
 function managedShimSource({ computerUseCommand = "" } = {}) {
@@ -311,6 +353,7 @@ function shimLooksManagedOrLegacy(contents) {
 }
 
 function configureLegacyNotifyShim() {
+  if (!commandAvailable("codex") || args["skip-codex"]) return;
   if (args["skip-legacy-shim"]) {
     console.log("Skipped legacy notify shim.");
     return;
@@ -351,7 +394,10 @@ function configureLegacyNotifyShim() {
 
 function installPlugin() {
   ensureCommand("node");
-  ensureCommand("codex");
+  if (!commandAvailable("codex") || args["skip-codex"]) {
+    console.log("Skipped Codex plugin installation; Codex is unavailable or disabled.");
+    return;
+  }
 
   const listBefore = run("codex", ["plugin", "marketplace", "list"], { allowFailure: true });
   if (!listBefore.stdout.includes(marketplaceName)) {
@@ -374,7 +420,8 @@ function installPlugin() {
   }
 }
 
-function configurePushDeerKey() {
+function configureCodexPushDeerKey() {
+  if (!commandAvailable("codex") || args["skip-codex"]) return;
   if (args["skip-key"]) {
     console.log("Skipped PushDeer key configuration.");
     return;
@@ -401,6 +448,30 @@ function configurePushDeerKey() {
   run(process.execPath, setupArgs, { stdio: "inherit" });
 }
 
+function configureClaudePushDeerKey() {
+  if (!commandAvailable("claude") || args["skip-claude"] || args["skip-key"] || args["skip-claude-key"]) {
+    if (args["skip-key"] || args["skip-claude-key"]) console.log("Skipped Claude PushDeer key configuration.");
+    return;
+  }
+
+  const current = loadAgentPingConfig();
+  const hasExplicitKey = args["claude-key"] ||
+    args["claude-key-stdin"] ||
+    process.env.AGENTPING_CLAUDE_PUSHDEER_KEY ||
+    process.env.CLAUDE_PUSHDEER_KEY;
+  if (current.claudePushkey && !args["force-claude-key"] && !hasExplicitKey) {
+    console.log(`Claude PushDeer key already configured in ${agentpingConfigPath()}`);
+    return;
+  }
+
+  const setupArgs = [setupScript, "--platform", "claude"];
+  if (args["claude-key"]) setupArgs.push("--key", String(args["claude-key"]));
+  if (args["claude-key-stdin"]) setupArgs.push("--stdin");
+  if (args.test) setupArgs.push("--test");
+  if (args["dry-run"]) setupArgs.push("--dry-run");
+  run(process.execPath, setupArgs, { stdio: "inherit" });
+}
+
 function migrateLegacyConfig() {
   const target = agentpingConfigPath();
   const source = configSourcePath();
@@ -417,6 +488,10 @@ function migrateLegacyConfig() {
 }
 
 function configureSummaryModel() {
+  if (!commandAvailable("codex") || args["skip-codex"]) {
+    console.log("Skipped Codex summary model detection.");
+    return;
+  }
   if (args["skip-model-check"]) {
     console.log("Skipped summary model detection.");
     return;
@@ -453,6 +528,20 @@ function configureSummaryModel() {
   if (selection.catalogError) {
     console.log(`Model detection warning: ${selection.catalogError}`);
   }
+}
+
+function configureClaudeSummaryModel() {
+  if (!commandAvailable("claude") || args["skip-claude"]) return;
+  const current = loadAgentPingConfig();
+  const claudeSummaryModel = String(
+    args["claude-summary-model"] || current.claudeSummaryModel || DEFAULT_CLAUDE_SUMMARY_MODEL,
+  ).trim();
+  if (args["dry-run"]) {
+    console.log(`[dry-run] write claudeSummaryModel=${claudeSummaryModel} to ${agentpingConfigPath()}`);
+    return;
+  }
+  saveConfigPatch({ claudeSummaryModel });
+  console.log(`Configured Claude summary model ${claudeSummaryModel}`);
 }
 
 function configureSummaryCharBounds() {
@@ -682,9 +771,11 @@ function configureTemplates() {
 
 installPlugin();
 await configureNotify();
+configureClaudeHooks();
 configureLegacyNotifyShim();
 migrateLegacyConfig();
 configureSummaryModel();
+configureClaudeSummaryModel();
 configureSummaryCharBounds();
 configureDespMaxChars();
 configureDespSeparator();
@@ -693,9 +784,10 @@ configureNotificationMode();
 configureLogSettings();
 configureDebugLogs();
 configureTemplates();
-configurePushDeerKey();
+configureCodexPushDeerKey();
+configureClaudePushDeerKey();
 
 console.log("");
 console.log("Installation complete.");
-console.log("Start a new Codex thread or restart Codex to make sure the updated plugin and notify setting are active.");
+console.log("Codex uses the notify setting immediately for new turns; Claude Code reloads settings automatically.");
 console.log("Use `npm run doctor` to check local setup.");

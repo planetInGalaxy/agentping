@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   DEFAULT_DEBUG_LOGS,
+  DEFAULT_CLAUDE_SUMMARY_MODEL,
   DEFAULT_DESP_MAX_CHARS,
   DEFAULT_DESP_SEPARATOR,
   DEFAULT_ENDPOINT,
@@ -53,7 +54,7 @@ function usage() {
     "Commands:",
     "  show                         Show effective config without revealing the PushDeer key",
     "  path                         Print config file path",
-    "  set-key --key <key>          Save PushDeer key",
+    "  set-key --key <key>          Save PushDeer key; use --platform codex|claude",
     "  set-key --stdin              Read PushDeer key from stdin",
     "  unset-key                    Remove stored PushDeer key",
     "  set-summary-range <min> <max> Configure LLM summary length",
@@ -86,7 +87,10 @@ function showConfig() {
     projectConfigPath: config.projectConfigPath || projectConfigSourcePath(),
     endpoint: config.endpoint || DEFAULT_ENDPOINT,
     hasPushkey: Boolean(config.pushkey),
+    hasCodexPushkey: Boolean(config.pushkey),
+    hasClaudePushkey: Boolean(config.claudePushkey),
     summaryModel: config.summaryModel || DEFAULT_SUMMARY_MODEL,
+    claudeSummaryModel: config.claudeSummaryModel || DEFAULT_CLAUDE_SUMMARY_MODEL,
     summaryMinChars: config.summaryMinChars,
     summaryMaxChars: config.summaryMaxChars,
     llmTimeoutMs: config.llmTimeoutMs,
@@ -128,6 +132,11 @@ function savePatch(patch, message) {
 }
 
 async function setKey() {
+  const platform = String(args.platform || "codex").trim().toLowerCase();
+  if (!new Set(["codex", "claude"]).has(platform)) {
+    console.error("platform must be codex or claude");
+    process.exit(2);
+  }
   let key = args.key ? String(args.key).trim() : "";
   if (!key && args.stdin) {
     key = (await readStdin()).trim();
@@ -137,16 +146,21 @@ async function setKey() {
     process.exit(2);
   }
   savePatch({
-    pushkey: key,
+    [platform === "claude" ? "claudePushkey" : "pushkey"]: key,
     endpoint: args.endpoint || DEFAULT_ENDPOINT,
-  }, "Saved PushDeer key");
+  }, `Saved ${platform} PushDeer key`);
 }
 
 function unsetKey() {
-  savePatch({
-    pushkey: undefined,
-    pushKey: undefined,
-  }, "Removed stored PushDeer key");
+  const platform = String(args.platform || "codex").trim().toLowerCase();
+  if (!new Set(["codex", "claude"]).has(platform)) {
+    console.error("platform must be codex or claude");
+    process.exit(2);
+  }
+  const patch = platform === "claude"
+    ? { claudePushkey: undefined, claudePushKey: undefined }
+    : { pushkey: undefined, pushKey: undefined };
+  savePatch(patch, `Removed stored ${platform} PushDeer key`);
 }
 
 function setSummaryRange() {
@@ -270,6 +284,7 @@ function initProjectConfig() {
   }
   writeJson0600(target, configWithChineseComments({
     summaryModel: DEFAULT_SUMMARY_MODEL,
+    claudeSummaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
     summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
     summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
     llmTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
@@ -291,6 +306,7 @@ function resetConfig() {
   const patch = {
     endpoint: DEFAULT_ENDPOINT,
     summaryModel: DEFAULT_SUMMARY_MODEL,
+    claudeSummaryModel: DEFAULT_CLAUDE_SUMMARY_MODEL,
     summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
     summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
     llmTimeoutMs: DEFAULT_LLM_TIMEOUT_MS,
@@ -311,6 +327,8 @@ function resetConfig() {
   if (args["forget-key"]) {
     patch.pushkey = undefined;
     patch.pushKey = undefined;
+    patch.claudePushkey = undefined;
+    patch.claudePushKey = undefined;
   }
   savePatch(patch, args["forget-key"] ? "Reset config and removed PushDeer key" : "Reset runtime config");
 }

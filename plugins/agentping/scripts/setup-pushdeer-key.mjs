@@ -14,6 +14,11 @@ import {
 } from "./pushdeer-lib.mjs";
 
 const args = parseArgs();
+const platform = String(args.platform || "codex").trim().toLowerCase();
+if (!new Set(["codex", "claude"]).has(platform)) {
+  console.error("platform must be codex or claude");
+  process.exit(2);
+}
 
 async function promptHidden(question) {
   if (!input.isTTY || typeof input.setRawMode !== "function") {
@@ -68,12 +73,14 @@ async function resolveKey() {
   if (args.stdin) {
     const piped = (await readStdin()).trim();
     if (piped) return piped;
-    return promptHidden("PushDeer pushkey: ");
+    return promptHidden(`${platform === "claude" ? "Claude" : "Codex"} PushDeer pushkey: `);
   }
-  const envKey = envValue("AGENTPING_PUSHDEER_KEY", "AGENTPING_KEY", "PUSHDEER_KEY", "CODEX_PUSHDEER_KEY");
+  const envKey = platform === "claude"
+    ? envValue("AGENTPING_CLAUDE_PUSHDEER_KEY", "CLAUDE_PUSHDEER_KEY")
+    : envValue("AGENTPING_PUSHDEER_KEY", "AGENTPING_KEY", "PUSHDEER_KEY", "CODEX_PUSHDEER_KEY");
   if (envKey) return envKey.trim();
 
-  return promptHidden("PushDeer pushkey: ");
+  return promptHidden(`${platform === "claude" ? "Claude" : "Codex"} PushDeer pushkey: `);
 }
 
 if (args.show) {
@@ -84,7 +91,10 @@ if (args.show) {
     projectConfigPath: config.projectConfigPath,
     endpoint: config.endpoint || DEFAULT_ENDPOINT,
     hasPushkey: Boolean(config.pushkey),
+    hasCodexPushkey: Boolean(config.pushkey),
+    hasClaudePushkey: Boolean(config.claudePushkey),
     summaryModel: config.summaryModel,
+    claudeSummaryModel: config.claudeSummaryModel,
     summaryMinChars: config.summaryMinChars,
     summaryMaxChars: config.summaryMaxChars,
     llmTimeoutMs: config.llmTimeoutMs,
@@ -106,12 +116,11 @@ if (args.show) {
 }
 
 if (args.unset) {
-  saveConfigPatch({
-    pushkey: undefined,
-    pushKey: undefined,
-    endpoint: args.endpoint || DEFAULT_ENDPOINT,
-  });
-  console.log(`Removed stored PushDeer key from ${configPath()}`);
+  const patch = platform === "claude"
+    ? { claudePushkey: undefined, claudePushKey: undefined }
+    : { pushkey: undefined, pushKey: undefined };
+  saveConfigPatch({ ...patch, endpoint: args.endpoint || DEFAULT_ENDPOINT });
+  console.log(`Removed stored ${platform} PushDeer key from ${configPath()}`);
   process.exit(0);
 }
 
@@ -123,11 +132,11 @@ if (!key) {
 
 const endpoint = args.endpoint || DEFAULT_ENDPOINT;
 saveConfigPatch({
-  pushkey: key,
+  [platform === "claude" ? "claudePushkey" : "pushkey"]: key,
   endpoint,
 });
 
-console.log(`Saved PushDeer config to ${configPath()}`);
+console.log(`Saved ${platform} PushDeer config to ${configPath()}`);
 
 if (args.test) {
   const result = await sendPushDeer({

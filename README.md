@@ -2,15 +2,15 @@
 
 AgentPing sends concise completion summaries when your AI agents finish.
 
-It currently supports Codex completion events and PushDeer delivery. The PushDeer `text` field is a short LLM-generated summary of the full assistant answer. The `desp` field contains a separator marker followed by the original assistant answer truncated to a configurable maximum length. If the summary model fails or times out, AgentPing falls back to a complete short sentence or a generic completion notice for `text`.
+It supports Codex and Claude Code completion events with PushDeer delivery. The PushDeer `text` field is a short LLM-generated summary of the full assistant answer. The `desp` field contains the configured answer preview. If the summary model fails or times out, AgentPing falls back to a complete short sentence or a generic completion notice for `text`.
 
-AgentPing uses Codex `notify` with the `agent-turn-complete` event. It does not rely on Codex Stop hooks for normal operation.
+AgentPing uses Codex `notify` with the `agent-turn-complete` event and Claude Code's official `Stop` and `StopFailure` hooks. Claude events are handed to a detached worker so notifications remain asynchronous from the user's perspective. Both platform adapters share the same config, templates, notification modes, preview formatter, logging, and PushDeer sender.
 
 ## What It Does
 
-- Runs after a Codex answer is complete.
+- Runs after a Codex or Claude Code answer is complete.
 - Ignores intermediate commentary/status messages and waits for Codex session `task_complete`.
-- Summarizes the full user question and assistant answer with `codex exec`.
+- Summarizes the full user question and assistant answer with the current platform's CLI: `codex exec` for Codex and a safe, non-persistent Claude print process for Claude Code.
 - Sends the summary in PushDeer `text`.
 - Sends a separator plus the original assistant answer in PushDeer `desp`, truncated to `despMaxChars`.
 - Asks the summary model for 50 to 100 Chinese characters by default.
@@ -23,16 +23,16 @@ AgentPing uses Codex `notify` with the `agent-turn-complete` event. It does not 
 - Keeps local logs privacy-safe by default; full text/stderr previews require `debugLogs`.
 - Records summary source, elapsed time, and fallback error reason in notifier logs.
 - Includes local self-test commands that use temporary files and dry-run PushDeer sends.
-- Stores each user's PushDeer key outside the repository.
+- Stores separate Codex and Claude PushDeer keys outside the repository so the receiving client can distinguish both sources.
 - Keeps compatibility with the old `codex-pushdeer` CLI and `CODEX_PUSHDEER_*` environment variables during migration.
-- Treats notification failures as non-blocking for the original Codex task.
+- Treats notification failures as non-blocking for the original agent task.
 
 ## Requirements
 
 - macOS or Linux with Node.js available as `node`.
-- Codex CLI available as `codex`.
-- A PushDeer `pushkey`.
-- Access to at least one Codex model for summary generation.
+- Codex CLI available as `codex`, Claude Code available as `claude`, or both.
+- A separate PushDeer `pushkey` for every installed agent you want to notify from.
+- Access to a summary model through the corresponding agent CLI.
 
 The installer detects available Codex models with `codex debug models` and stores the selected summary model in local config. If you want to force a model, pass it during install:
 
@@ -52,22 +52,26 @@ node scripts/install.mjs
 
 The installer will:
 
-- Add this repository as a local Codex plugin marketplace named `agentping`.
-- Install `agentping@agentping`.
-- Configure the top-level Codex `notify` entry in `~/.codex/config.toml`.
-- Detect and store an available Codex summary model.
-- Prompt for a PushDeer key if one is not already configured.
+- Configure every supported agent found on the machine.
+- For Codex, install `agentping@agentping`, configure `~/.codex/config.toml`, and detect a summary model.
+- For Claude Code, merge lightweight `Stop` and `StopFailure` hooks into `~/.claude/settings.json` without replacing unrelated hooks. The hook launches the notification worker in a detached process so interactive sessions and one-shot `claude -p` commands behave consistently.
+- Prompt separately for missing Codex and Claude PushDeer keys.
+- Store both keys only in `~/.config/agentping/config.json` with mode `0600`.
 
 To pass the key non-interactively:
 
 ```bash
-AGENTPING_PUSHDEER_KEY='PDU...' node scripts/install.mjs
+AGENTPING_PUSHDEER_KEY='PDU...' \
+AGENTPING_CLAUDE_PUSHDEER_KEY='PDU...' \
+node scripts/install.mjs
 ```
 
 To send a real PushDeer test notification during setup:
 
 ```bash
-AGENTPING_PUSHDEER_KEY='PDU...' node scripts/install.mjs --test
+AGENTPING_PUSHDEER_KEY='PDU...' \
+AGENTPING_CLAUDE_PUSHDEER_KEY='PDU...' \
+node scripts/install.mjs --test
 ```
 
 To preview what the installer would do without changing local files:
@@ -80,26 +84,29 @@ Useful install flags:
 
 ```bash
 node scripts/install.mjs --summary-model gpt-5.4-mini
+node scripts/install.mjs --claude-summary-model haiku
 node scripts/install.mjs --summary-min-chars 50 --summary-max-chars 100
 node scripts/install.mjs --llm-timeout-ms 15000
 node scripts/install.mjs --desp-max-chars -1
-node scripts/install.mjs --desp-separator "\n-----\n"
+node scripts/install.mjs --desp-separator "\n\n---\n\n"
 node scripts/install.mjs --final-wait-ms 8000
 node scripts/install.mjs --notify-mode always
 node scripts/install.mjs --notify-mode long_only --min-duration-ms 30000
 node scripts/install.mjs --log-max-bytes 2097152 --log-keep-files 3
 node scripts/install.mjs --debug-logs off
 node scripts/install.mjs --title-template "{summary}"
-node scripts/install.mjs --desp-template "{separator}{finalText}"
+node scripts/install.mjs --desp-template "用时：{durationZh}{separator}{finalTextPreview}"
 node scripts/install.mjs --no-desp
 node scripts/install.mjs --no-desp-separator
 node scripts/install.mjs --skip-model-check
+node scripts/install.mjs --skip-codex
+node scripts/install.mjs --skip-claude
 node scripts/install.mjs --force-notify
 node scripts/install.mjs --install-legacy-shim
 node scripts/install.mjs --skip-legacy-shim
 ```
 
-After installation, start a new Codex thread or restart Codex.
+Codex uses the configured notify command for subsequent turns. Claude Code watches its settings file and normally picks up the hooks without a restart; `/hooks` shows their installed source and details.
 
 ## Package-Style Usage
 
@@ -132,7 +139,7 @@ If you already use another notifier, do not force overwrite unless replacing it 
 
 ## Configuration Files
 
-The PushDeer key is saved here:
+Both platform-specific PushDeer keys are saved here:
 
 ```text
 ~/.config/agentping/config.json
@@ -150,13 +157,23 @@ The installer writes a line like this:
 notify = ["node", "/absolute/path/to/repo/plugins/agentping/scripts/pushdeer-notify-event.mjs"]
 ```
 
+Claude Code hooks are merged into:
+
+```text
+~/.claude/settings.json
+```
+
+The Claude hooks invoke `claude-notify-launcher.mjs`, which immediately hands the event to a detached `claude-notify-event.mjs` worker. LLM summary generation does not delay the final answer UI and continues after a one-shot Claude process exits.
+
 The notifier config stores local runtime settings:
 
 ```json
 {
   "pushkey": "PDU...",
+  "claudePushkey": "PDU...",
   "endpoint": "https://api2.pushdeer.com/message/push",
   "summaryModel": "gpt-5.4-mini",
+  "claudeSummaryModel": "haiku",
   "summaryMinChars": 50,
   "summaryMaxChars": 100,
   "llmTimeoutMs": 16000,
@@ -178,7 +195,7 @@ The notifier config stores local runtime settings:
 
 The user-level file `~/.config/agentping/config.json` is the global base configuration and applies to every project. Each setting written by AgentPing is followed by a `fieldName__说明` entry in Chinese; these explanation entries are documentation only and do not affect runtime behavior.
 
-Project-level settings can be stored in `.agentping.json` or `agentping.config.json` in a project directory. AgentPing starts at the current working directory, searches upward for the nearest project config, and overlays its values on top of the global config. Only settings that differ for that project need to be included. Project config intentionally ignores `pushkey`/`pushKey`, so secrets stay in `~/.config/agentping/config.json`.
+Project-level settings can be stored in `.agentping.json` or `agentping.config.json` in a project directory. AgentPing starts at the current working directory, searches upward for the nearest project config, and overlays its values on top of the global config. Only settings that differ for that project need to be included. Project config intentionally ignores every Codex and Claude key field, so secrets stay in `~/.config/agentping/config.json`.
 
 Create a documented project config in the current project with `agentping config init-project`. Use `agentping config show` from that project to inspect the effective merged configuration and the project config path that was found.
 
@@ -188,6 +205,7 @@ Optional environment variables:
 
 ```bash
 export AGENTPING_SUMMARY_MODEL=gpt-5.4-mini
+export AGENTPING_CLAUDE_SUMMARY_MODEL=haiku
 export AGENTPING_SUMMARY_MIN_CHARS=50
 export AGENTPING_SUMMARY_MAX_CHARS=100
 export AGENTPING_LLM_TIMEOUT_MS=16000
@@ -206,9 +224,11 @@ export AGENTPING_FINAL_TEXT_PREVIEW_TAIL_CHARS=150
 export AGENTPING_FINAL_TEXT_PREVIEW_MARKER='\n......\n'
 export AGENTPING_PUSHDEER_ENDPOINT=https://api2.pushdeer.com/message/push
 export AGENTPING_PUSHDEER_KEY='PDU...'
+export AGENTPING_CLAUDE_PUSHDEER_KEY='PDU...'
 ```
 
-`AGENTPING_PUSHDEER_KEY`, `AGENTPING_KEY`, and `PUSHDEER_KEY` override the stored config key.
+`AGENTPING_PUSHDEER_KEY`, `AGENTPING_KEY`, and `PUSHDEER_KEY` override the Codex key. `AGENTPING_CLAUDE_PUSHDEER_KEY` and `CLAUDE_PUSHDEER_KEY` override the Claude key. Claude never falls back to the Codex key, so source separation is preserved.
+`AGENTPING_CLAUDE_SUMMARY_MODEL` overrides the Claude summary model; the default is `haiku`.
 `AGENTPING_SUMMARY_MODEL`, `AGENTPING_SUMMARY_MIN_CHARS`, `AGENTPING_SUMMARY_MAX_CHARS`, and `AGENTPING_LLM_TIMEOUT_MS` override the stored summary settings.
 Summary length is prompt-guided, not enforced by hard truncation. If the model returns a slightly longer complete sentence, the notifier sends it as-is.
 The summary model receives the full user prompt and full final answer so the generated notification title is based on complete context.
@@ -233,6 +253,8 @@ Show PushDeer config status:
 ```bash
 npm run config:show
 agentping config show
+agentping config set-key --platform codex --stdin
+agentping config set-key --platform claude --stdin
 agentping config set-summary-range 50 100
 agentping config set-timeout 15000
 agentping config set-desp-max -1
@@ -268,6 +290,13 @@ Run a dry-run manual notification:
 npm run notify:dry-run
 ```
 
+Run the Claude adapter against the real Claude summary command without sending PushDeer, or add `--real` for a clearly labeled end-to-end test notification:
+
+```bash
+agentping test claude_live
+agentping test claude_live --real
+```
+
 Inspect and manage local notifier logs:
 
 ```bash
@@ -298,9 +327,9 @@ npm run plugin:validate
 node scripts/uninstall.mjs
 ```
 
-This removes the installed plugin and removes the Codex `notify` line only when it points at this checkout.
+This removes the installed Codex plugin, removes the Codex `notify` line only when it points at this checkout, and removes only AgentPing's handlers from Claude settings while preserving unrelated hooks.
 
-To also remove the stored PushDeer key:
+To also remove both stored platform-specific PushDeer keys:
 
 ```bash
 node scripts/uninstall.mjs --forget-key
@@ -314,9 +343,9 @@ node scripts/uninstall.mjs --remove-marketplace
 
 ## Privacy And Security
 
-Each automatic notification summarizes the latest user prompt and assistant answer by launching a temporary `codex exec` process. The summary text is then sent to PushDeer.
+Each automatic notification summarizes the latest user prompt and assistant answer through the corresponding local agent CLI. Codex notifications use a temporary `codex exec`; Claude notifications use a safe, non-persistent `claude --print` process with hooks and tools disabled. The summary text and configured answer preview are then sent to PushDeer.
 
-Summary subprocesses reuse the normal Codex login but use an HTTPS-only provider profile. This avoids waiting through WebSocket retries on networks where WebSocket streaming is unavailable, while keeping the same OpenAI Codex endpoint and selected model.
+Codex summary subprocesses reuse the normal Codex login but use an HTTPS-only provider profile. Claude summary subprocesses reuse the normal Claude Code authentication while `--safe-mode` prevents recursive hooks and project customizations.
 
 The notifier redacts common PushDeer keys, OpenAI-style keys, bearer tokens, long URLs, and query token parameters before summarization and logging. This is a best-effort filter, not a complete data-loss-prevention system.
 
@@ -348,7 +377,7 @@ cd agentping
 node scripts/install.mjs
 ```
 
-Pin releases with Git tags such as `v0.4.1`.
+Pin releases with Git tags such as `v0.5.0`.
 
 ## Troubleshooting
 
@@ -361,10 +390,11 @@ npm run doctor
 Common failures:
 
 - `codex` command missing: install or log into Codex CLI first.
+- `claude` command missing: install or log into Claude Code first; Codex-only installation remains supported.
 - `notify` mismatch: another notifier is configured in `~/.codex/config.toml`; rerun install with `--force-notify` only if replacement is intended.
-- PushDeer key missing: run `AGENTPING_PUSHDEER_KEY='PDU...' node scripts/install.mjs`.
+- Codex or Claude PushDeer key missing: rerun the installer, or use `agentping config set-key --platform codex --stdin` and `agentping config set-key --platform claude --stdin`.
 - Summary model unavailable: run `npm run check-models -- --write-config` or reinstall with `--summary-model <model>`.
-- No notification after install: restart Codex or start a new Codex thread.
+- No Claude notification after install: run `agentping doctor`, then use Claude Code's `/hooks` view to confirm one AgentPing handler under both `Stop` and `StopFailure`.
 - Old Codex task does not notify after install: run `node scripts/install.mjs --install-legacy-shim`, then finish the old task again. This only helps tasks that call `~/.codex/notify-multiplexer.mjs` at completion.
 - Notification arrives for tasks you do not care about: use `agentping config set-mode long_only --min-duration-ms 30000` or `agentping config set-mode off`.
 - Log file is too large: run `agentping logs rotate`, `agentping logs clear`, or reduce `logMaxBytes`.

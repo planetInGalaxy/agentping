@@ -4,11 +4,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  claudeSettingsPath,
+  readClaudeSettings,
+  removeClaudeHooks,
+  writeClaudeSettings,
+} from "./claude-hooks.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), "..");
 const pluginRoot = path.join(projectRoot, "plugins", "agentping");
 const notifyScript = path.join(pluginRoot, "scripts", "pushdeer-notify-event.mjs");
+const claudeNotifyScript = path.join(pluginRoot, "scripts", "claude-notify-launcher.mjs");
 const legacyNotifyScript = path.join(
   projectRoot,
   "plugins",
@@ -83,6 +90,29 @@ function removeNotifyLine() {
   console.log(`Removed AgentPing notify from ${configFile}`);
 }
 
+function removeClaudeHookSettings() {
+  const settingsFile = claudeSettingsPath();
+  if (!fs.existsSync(settingsFile)) return;
+  let current;
+  try {
+    current = readClaudeSettings(settingsFile);
+  } catch (error) {
+    console.error(`Could not parse Claude settings at ${settingsFile}: ${error?.message || String(error)}`);
+    return;
+  }
+  const result = removeClaudeHooks(current, { notifyScript: claudeNotifyScript });
+  if (!result.changed) {
+    console.log("Claude hooks were not changed because no AgentPing hook was found.");
+    return;
+  }
+  if (args["dry-run"]) {
+    console.log(`[dry-run] remove AgentPing hooks from ${settingsFile}`);
+    return;
+  }
+  writeClaudeSettings(settingsFile, result.settings);
+  console.log(`Removed AgentPing hooks from ${settingsFile}`);
+}
+
 run("codex", ["plugin", "remove", `${pluginName}@${marketplaceName}`]);
 for (const legacyName of legacyMarketplaceNames) {
   run("codex", ["plugin", "remove", `${legacyPluginName}@${legacyName}`]);
@@ -94,11 +124,13 @@ if (args["remove-marketplace"]) {
   }
 }
 removeNotifyLine();
+if (!args["keep-claude-hooks"]) removeClaudeHookSettings();
 
 if (args["forget-key"]) {
   run(process.execPath, [setupScript, "--unset"], { allowFailure: false });
+  run(process.execPath, [setupScript, "--platform", "claude", "--unset"], { allowFailure: false });
 } else {
-  console.log("PushDeer key was left in place. Re-run with --forget-key to remove it.");
+  console.log("Codex and Claude PushDeer keys were left in place. Re-run with --forget-key to remove both.");
 }
 
 console.log("Uninstall complete.");

@@ -26,7 +26,7 @@ if (command === "help" || command === "--help" || command === "-h") {
     "Usage: agentping <command> [options]",
     "",
     "Commands:",
-    "  install       Install plugin, configure Codex notify, and save PushDeer config",
+    "  install       Configure Codex and Claude Code completion notifications",
     "  uninstall     Remove plugin and optional local config",
     "  doctor        Diagnose local AgentPing setup",
     "  config        Show or change PushDeer notifier config",

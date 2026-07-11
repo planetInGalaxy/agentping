@@ -27,6 +27,9 @@ assert(/^\d+\.\d+\.\d+/.test(manifest.version), "Plugin version must look semver
 assert(manifest.skills === "./skills/", "Manifest skills path should be ./skills/.");
 assert(fs.existsSync(path.join(pluginRoot, "skills")), "Missing plugin skills directory.");
 assert(fs.existsSync(path.join(pluginRoot, "scripts", "pushdeer-notify-event.mjs")), "Missing notify event script.");
+assert(fs.existsSync(path.join(pluginRoot, "scripts", "claude-notify-event.mjs")), "Missing Claude notify event script.");
+assert(fs.existsSync(path.join(pluginRoot, "scripts", "claude-notify-launcher.mjs")), "Missing Claude notify launcher.");
+assert(fs.existsSync(path.join(pluginRoot, "scripts", "completion-notify.mjs")), "Missing shared completion notifier.");
 
 const marketplace = readJson(marketplacePath);
 assert(marketplace.name === "agentping", "Unexpected marketplace name.");

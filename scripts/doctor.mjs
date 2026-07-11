@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  DEFAULT_CLAUDE_SUMMARY_MODEL,
   DEFAULT_DESP_MAX_CHARS,
   DEFAULT_DESP_SEPARATOR,
   DEFAULT_DESP_TEMPLATE,
@@ -26,6 +27,11 @@ import {
   statePath,
   takeChars,
 } from "../plugins/agentping/scripts/pushdeer-lib.mjs";
+import {
+  claudeHookStatus,
+  claudeSettingsPath,
+  readClaudeSettings,
+} from "./claude-hooks.mjs";
 import { chooseSummaryModel, codexConfigPath } from "./model-utils.mjs";
 import {
   notifyCommandForScript,
@@ -40,6 +46,13 @@ const notifyScript = path.join(
   "agentping",
   "scripts",
   "pushdeer-notify-event.mjs",
+);
+const claudeNotifyScript = path.join(
+  projectRoot,
+  "plugins",
+  "agentping",
+  "scripts",
+  "claude-notify-launcher.mjs",
 );
 const legacyNotifyScript = path.join(
   projectRoot,
@@ -183,22 +196,49 @@ function legacyShimStatus() {
   };
 }
 
+function claudeHooksStatus() {
+  const settingsFile = claudeSettingsPath();
+  try {
+    return claudeHookStatus(readClaudeSettings(settingsFile), {
+      notifyScript: claudeNotifyScript,
+    });
+  } catch (error) {
+    return { ok: false, detail: `${settingsFile} could not be parsed: ${error?.message || String(error)}` };
+  }
+}
+
 const config = loadConfig();
 const modelSelection = chooseSummaryModel({ preferredModel: config.summaryModel });
+const codexCommand = checkCommand("codex");
+const claudeCommand = checkCommand("claude");
+const hasSupportedAgent = codexCommand.ok || claudeCommand.ok;
 const checks = {
   node: checkCommand("node"),
-  codex: checkCommand("codex"),
-  marketplace: marketplaceStatus(),
-  plugin: pluginStatus(),
-  notify: notifyStatus(),
+  codex: codexCommand.ok
+    ? codexCommand
+    : { ok: hasSupportedAgent, detail: "not installed (optional when Claude Code is available)" },
+  claude: claudeCommand.ok
+    ? claudeCommand
+    : { ok: hasSupportedAgent, detail: "not installed (optional when Codex is available)" },
+  marketplace: codexCommand.ok ? marketplaceStatus() : { ok: true, detail: "skipped without Codex" },
+  plugin: codexCommand.ok ? pluginStatus() : { ok: true, detail: "skipped without Codex" },
+  notify: codexCommand.ok ? notifyStatus() : { ok: true, detail: "skipped without Codex" },
+  claudeHooks: claudeCommand.ok ? claudeHooksStatus() : { ok: true, detail: "skipped without Claude Code" },
   legacyShim: legacyShimStatus(),
   agentpingConfig: {
-    ok: Boolean(config.pushkey),
-    detail: `${agentpingConfigPath()} ${config.pushkey ? "has key" : "missing key"}; source ${configSourcePath()}`,
+    ok: (codexCommand.ok ? Boolean(config.pushkey) : true) &&
+      (claudeCommand.ok ? Boolean(config.claudePushkey) : true),
+    detail: `${agentpingConfigPath()} Codex key ${config.pushkey ? "configured" : "missing"}, Claude key ${config.claudePushkey ? "configured" : "missing"}; source ${configSourcePath()}`,
   },
   summaryModel: {
-    ok: Boolean(modelSelection.model),
-    detail: `${modelSelection.model || "none"} (${modelSelection.source})`,
+    ok: codexCommand.ok ? Boolean(modelSelection.model) : true,
+    detail: codexCommand.ok ? `${modelSelection.model || "none"} (${modelSelection.source})` : "skipped without Codex",
+  },
+  claudeSummaryModel: {
+    ok: claudeCommand.ok ? Boolean(config.claudeSummaryModel) : true,
+    detail: claudeCommand.ok
+      ? `${config.claudeSummaryModel || "none"}, default ${DEFAULT_CLAUDE_SUMMARY_MODEL}`
+      : "skipped without Claude Code",
   },
   summaryLength: {
     ok: config.summaryMinChars >= 0 && config.summaryMaxChars >= config.summaryMinChars,
@@ -248,6 +288,7 @@ const checks = {
 const summary = {
   ok: Object.values(checks).every((item) => item.ok),
   codexConfigPath: codexConfigPath(),
+  claudeSettingsPath: claudeSettingsPath(),
   agentpingConfigPath: agentpingConfigPath(),
   configSourcePath: configSourcePath(),
   stateLogPath: statePath("notifier.log"),

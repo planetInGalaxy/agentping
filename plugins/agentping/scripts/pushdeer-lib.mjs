@@ -7,6 +7,7 @@ export const DEFAULT_ENDPOINT = "https://api2.pushdeer.com/message/push";
 export const APP_NAME = "agentping";
 export const LEGACY_APP_NAME = "codex-pushdeer-notifier";
 export const DEFAULT_SUMMARY_MODEL = "gpt-5.4-mini";
+export const DEFAULT_CLAUDE_SUMMARY_MODEL = "haiku";
 export const DEFAULT_SUMMARY_MIN_CHARS = 50;
 export const DEFAULT_SUMMARY_MAX_CHARS = 100;
 export const DEFAULT_LLM_TIMEOUT_MS = 16_000;
@@ -30,9 +31,11 @@ export const NOTIFY_MODES = ["always", "long_only", "errors_only", "off"];
 export const PROJECT_CONFIG_FILES = [".agentping.json", "agentping.config.json"];
 
 export const CONFIG_FIELD_COMMENTS = {
-  pushkey: "PushDeer 推送密钥，仅应保存在全局配置中；项目配置里的密钥会被忽略。",
+  pushkey: "PushDeer 推送密钥，仅供 Codex 通知使用；项目配置里的密钥会被忽略。",
+  claudePushkey: "Claude Code 专用 PushDeer 推送密钥；与 Codex 分开配置，项目配置里的密钥会被忽略。",
   endpoint: "PushDeer 服务端的消息推送接口地址。",
   summaryModel: "用于生成通知摘要的 Codex 模型。",
+  claudeSummaryModel: "用于生成 Claude Code 通知摘要的 Claude 模型。",
   summaryMinChars: "LLM 摘要期望的最少汉字数，会动态写入摘要 Prompt。",
   summaryMaxChars: "LLM 摘要期望的最多汉字数，会动态写入摘要 Prompt；为保证语句完整不会强制截断。",
   llmTimeoutMs: "等待 LLM 生成摘要的最长毫秒数；超时后改用本地摘要。",
@@ -263,6 +266,9 @@ function stripProjectSecrets(config) {
   delete output.pushkey;
   delete output.pushKey;
   delete output.pushdeerKey;
+  delete output.claudePushkey;
+  delete output.claudePushKey;
+  delete output.claude_pushkey;
   return output;
 }
 
@@ -293,11 +299,22 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     config.pushkey ||
     config.pushKey ||
     "";
+  const claudePushkey =
+    envValue("AGENTPING_CLAUDE_PUSHDEER_KEY", "CLAUDE_PUSHDEER_KEY") ||
+    config.claudePushkey ||
+    config.claudePushKey ||
+    config.claude_pushkey ||
+    "";
   const summaryModel =
     envValue("AGENTPING_SUMMARY_MODEL", "CODEX_PUSHDEER_SUMMARY_MODEL") ||
     config.summaryModel ||
     config.summary_model ||
     DEFAULT_SUMMARY_MODEL;
+  const claudeSummaryModel =
+    envValue("AGENTPING_CLAUDE_SUMMARY_MODEL") ||
+    config.claudeSummaryModel ||
+    config.claude_summary_model ||
+    DEFAULT_CLAUDE_SUMMARY_MODEL;
   const summaryMinChars = Number.parseInt(
     envValue("AGENTPING_SUMMARY_MIN_CHARS", "CODEX_PUSHDEER_SUMMARY_MIN_CHARS") ??
       config.summaryMinChars ??
@@ -404,7 +421,9 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     projectConfigPath: projectPath,
     endpoint,
     pushkey,
+    claudePushkey,
     summaryModel,
+    claudeSummaryModel,
     ...summaryBounds,
     llmTimeoutMs: Number.isFinite(llmTimeoutMs) && llmTimeoutMs > 0
       ? llmTimeoutMs
@@ -423,6 +442,12 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     finalTextPreviewTailChars: normalizePreviewChars(finalTextPreviewTailChars, DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS),
     finalTextPreviewMarker: normalizeDespSeparator(finalTextPreviewMarker),
   };
+}
+
+export function pushkeyForPlatform(config, platform = "codex") {
+  return platform === "claude"
+    ? String(config?.claudePushkey || "")
+    : String(config?.pushkey || "");
 }
 
 export function saveConfigPatch(patch) {

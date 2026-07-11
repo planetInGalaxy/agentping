@@ -6,6 +6,7 @@ import {
   logEvent,
   logTextMeta,
   parseArgs,
+  pushkeyForPlatform,
   sendPushDeer,
 } from "./pushdeer-lib.mjs";
 
@@ -16,9 +17,10 @@ const desp = args.desp || args.description || args._[1] || "";
 const quiet = Boolean(args.quiet);
 const dryRun = Boolean(args["dry-run"] || envValue("AGENTPING_DRY_RUN", "CODEX_PUSHDEER_DRY_RUN"));
 const config = loadConfig();
+const platform = String(args.platform || "codex").trim().toLowerCase();
 
 const endpoint = args.endpoint || config.endpoint || DEFAULT_ENDPOINT;
-const pushkey = args.pushkey || config.pushkey || "";
+const pushkey = args.pushkey || pushkeyForPlatform(config, platform);
 
 if (!title) {
   const message = "Usage: pushdeer-notify.mjs --title <text> [--desp <description>]";
@@ -39,6 +41,7 @@ try {
   logEvent("info", "PushDeer notification sent", {
     dryRun,
     status: result.status,
+    platform,
     ...logTextMeta("title", title, { config }),
     ...logTextMeta("desp", desp, { config }),
   });

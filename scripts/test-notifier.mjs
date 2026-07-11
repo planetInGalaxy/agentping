@@ -11,8 +11,12 @@ import {
   removeClaudeHooks,
 } from "./claude-hooks.mjs";
 import {
+  DEFAULT_CLAUDE_SUMMARY_MODEL,
   DEFAULT_DESP_TEMPLATE,
   DEFAULT_DESP_SEPARATOR,
+  DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS,
+  DEFAULT_FINAL_TEXT_PREVIEW_MARKER,
+  DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS,
   DEFAULT_TITLE_TEMPLATE,
   charLength,
   codexSummaryExecArgs,
@@ -307,18 +311,25 @@ function readLog(workspace) {
 }
 
 function testFormatHelpers() {
+  assert.equal(DEFAULT_CLAUDE_SUMMARY_MODEL, "sonnet");
+  assert.equal(DEFAULT_DESP_SEPARATOR, "\n***\n");
+  assert.equal(DEFAULT_TITLE_TEMPLATE, "### {summary}");
+  assert.equal(DEFAULT_DESP_TEMPLATE, "{separator}>>>> ### 用时: {durationZh}\n### 回答摘录:\n{finalTextPreview}");
+  assert.equal(DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS, 100);
+  assert.equal(DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS, 100);
+  assert.equal(DEFAULT_FINAL_TEXT_PREVIEW_MARKER, "\n\n......\n\n");
   const documentedConfig = configWithChineseComments({
     pushkey: "codex-key",
     claudePushkey: "claude-key",
     summaryModel: "gpt-5.4-mini",
-    claudeSummaryModel: "haiku",
+    claudeSummaryModel: "sonnet",
     summaryMinChars: 50,
     summaryMaxChars: 100,
   });
   assert.equal(documentedConfig.agents.codex.PushKey, "codex-key");
   assert.equal(documentedConfig.agents.claude.PushKey, "claude-key");
   assert.equal(documentedConfig.agents.codex.summaryModel, "gpt-5.4-mini");
-  assert.equal(documentedConfig.agents.claude.summaryModel, "haiku");
+  assert.equal(documentedConfig.agents.claude.summaryModel, "sonnet");
   assert.equal(documentedConfig.pushkey, undefined);
   assert.ok(Array.isArray(documentedConfig._说明));
   assert.ok(documentedConfig._说明.some((line) => /summaryMinChars.*Prompt/u.test(line)));
@@ -691,7 +702,7 @@ function testClaudeStopNotification() {
     assert.match(log, new RegExp(summary, "u"));
     assert.ok(capture.args.includes("--safe-mode"));
     assert.ok(capture.args.includes("--no-session-persistence"));
-    assert.ok(capture.args.includes("haiku"));
+    assert.ok(capture.args.includes("sonnet"));
     assert.match(capture.input, new RegExp(userText, "u"));
     assert.match(capture.input, new RegExp(finalText, "u"));
   } finally {

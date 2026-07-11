@@ -50,7 +50,7 @@ node scripts/config.mjs set-mode off
 node scripts/config.mjs set-summary-range 50 100
 node scripts/config.mjs set-timeout 15000
 node scripts/config.mjs set-desp-max -1
-node scripts/config.mjs set-separator "\n\n---\n\n"
+node scripts/config.mjs set-separator "\n***\n"
 ```
 
 - Inspect notifier logs:
@@ -97,7 +97,7 @@ AGENTPING_DRY_RUN=1 node plugins/agentping/scripts/pushdeer-notify.mjs \
 - Use manual notification commands only for setup, tests, troubleshooting, or explicit one-off user requests.
 - Automatic completion notifications send the LLM summary in PushDeer `text`, and a separator plus the original assistant answer in `desp`.
 - Truncate automatic `desp` with `despMaxChars`; the default is `-1` for no total limit, positive values are capped to 1000, and `0` omits `desp`.
-- Use `despSeparator` to distinguish the summary from original content when PushDeer clients display `text` and `desp` together. The default is `\n\n---\n\n`.
+- Use `despSeparator` to distinguish the summary from original content when PushDeer clients display `text` and `desp` together. The default is `\n***\n`.
 - Prompt automatic summaries toward the configured `summaryMinChars` to `summaryMaxChars` range; defaults are 50 to 100 Chinese characters.
 - Do not hard-truncate valid LLM summaries. Accept modest overflow for sentence completeness, but reject excessively long output or an apparent copy of the final answer and use the configured `summaryFallbackText` instead.
 - Use `summaryFallbackText` for LLM timeout, command failure, empty output, or invalid output. The default is `摘要未生成，请看原回答`.

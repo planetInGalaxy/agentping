@@ -92,18 +92,18 @@ Useful install flags:
 
 ```bash
 node scripts/install.mjs --summary-model gpt-5.4-mini
-node scripts/install.mjs --claude-summary-model haiku
+node scripts/install.mjs --claude-summary-model sonnet
 node scripts/install.mjs --summary-min-chars 50 --summary-max-chars 100
 node scripts/install.mjs --llm-timeout-ms 15000
 node scripts/install.mjs --desp-max-chars -1
-node scripts/install.mjs --desp-separator "\n\n---\n\n"
+node scripts/install.mjs --desp-separator "\n***\n"
 node scripts/install.mjs --final-wait-ms 8000
 node scripts/install.mjs --notify-mode always
 node scripts/install.mjs --notify-mode long_only --min-duration-ms 30000
 node scripts/install.mjs --log-max-bytes 2097152 --log-keep-files 3
 node scripts/install.mjs --debug-logs off
-node scripts/install.mjs --title-template "{summary}"
-node scripts/install.mjs --desp-template "用时：{durationZh}{separator}{finalTextPreview}"
+node scripts/install.mjs --title-template "### {summary}"
+node scripts/install.mjs --desp-template "{separator}>>>> ### 用时: {durationZh}\n### 回答摘录:\n{finalTextPreview}"
 node scripts/install.mjs --no-desp
 node scripts/install.mjs --no-desp-separator
 node scripts/install.mjs --skip-model-check
@@ -195,7 +195,7 @@ The notifier config stores local runtime settings:
       "enabled": true,
       "PushKey": "PDU...",
       "summaryProvider": "claude",
-      "summaryModel": "haiku",
+      "summaryModel": "sonnet",
       "summaryTimeoutMs": 16000
     },
     "openclaw": {
@@ -219,18 +219,18 @@ The notifier config stores local runtime settings:
   "summaryMaxChars": 100,
   "summaryFallbackText": "摘要未生成，请看原回答",
   "despMaxChars": -1,
-  "despSeparator": "\n\n---\n\n",
+  "despSeparator": "\n***\n",
   "finalWaitMs": 8000,
   "notifyMode": "long_only",
   "minDurationMs": 10000,
   "logMaxBytes": 2097152,
   "logKeepFiles": 3,
   "debugLogs": false,
-  "titleTemplate": "{summary}",
-  "despTemplate": "用时：{durationZh}{separator}{finalTextPreview}",
-  "finalTextPreviewHeadChars": 200,
-  "finalTextPreviewTailChars": 150,
-  "finalTextPreviewMarker": "\n......\n",
+  "titleTemplate": "### {summary}",
+  "despTemplate": "{separator}>>>> ### 用时: {durationZh}\n### 回答摘录:\n{finalTextPreview}",
+  "finalTextPreviewHeadChars": 100,
+  "finalTextPreviewTailChars": 100,
+  "finalTextPreviewMarker": "\n\n......\n\n",
   "_说明": [
     "每个配置项的中文说明由 AgentPing 自动写入此数组，与实际配置字段分开。"
   ]
@@ -251,24 +251,24 @@ Optional environment variables:
 
 ```bash
 export AGENTPING_SUMMARY_MODEL=gpt-5.4-mini
-export AGENTPING_CLAUDE_SUMMARY_MODEL=haiku
+export AGENTPING_CLAUDE_SUMMARY_MODEL=sonnet
 export AGENTPING_SUMMARY_MIN_CHARS=50
 export AGENTPING_SUMMARY_MAX_CHARS=100
 export AGENTPING_SUMMARY_FALLBACK_TEXT='摘要未生成，请看原回答'
 export AGENTPING_LLM_TIMEOUT_MS=16000
 export AGENTPING_DESP_MAX_CHARS=-1
-export AGENTPING_DESP_SEPARATOR='\n\n---\n\n'
+export AGENTPING_DESP_SEPARATOR='\n***\n'
 export AGENTPING_FINAL_WAIT_MS=8000
 export AGENTPING_NOTIFY_MODE=long_only
 export AGENTPING_MIN_DURATION_MS=10000
 export AGENTPING_LOG_MAX_BYTES=2097152
 export AGENTPING_LOG_KEEP_FILES=3
 export AGENTPING_DEBUG_LOGS=0
-export AGENTPING_TITLE_TEMPLATE='{summary}'
-export AGENTPING_DESP_TEMPLATE='用时：{durationZh}{separator}{finalTextPreview}'
-export AGENTPING_FINAL_TEXT_PREVIEW_HEAD_CHARS=200
-export AGENTPING_FINAL_TEXT_PREVIEW_TAIL_CHARS=150
-export AGENTPING_FINAL_TEXT_PREVIEW_MARKER='\n......\n'
+export AGENTPING_TITLE_TEMPLATE='### {summary}'
+export AGENTPING_DESP_TEMPLATE='{separator}>>>> ### 用时: {durationZh}\n### 回答摘录:\n{finalTextPreview}'
+export AGENTPING_FINAL_TEXT_PREVIEW_HEAD_CHARS=100
+export AGENTPING_FINAL_TEXT_PREVIEW_TAIL_CHARS=100
+export AGENTPING_FINAL_TEXT_PREVIEW_MARKER='\n\n......\n\n'
 export AGENTPING_PUSHDEER_ENDPOINT=https://api2.pushdeer.com/message/push
 export AGENTPING_PUSHDEER_KEY='PDU...'
 export AGENTPING_CLAUDE_PUSHDEER_KEY='PDU...'
@@ -280,7 +280,7 @@ export AGENTPING_HERMES_SUMMARY_TIMEOUT_MS=16000
 ```
 
 `AGENTPING_PUSHDEER_KEY`, `AGENTPING_KEY`, and `PUSHDEER_KEY` are legacy Codex overrides. New code may use `AGENTPING_<AGENT>_PUSHDEER_KEY`, `AGENTPING_<AGENT>_SUMMARY_PROVIDER`, `AGENTPING_<AGENT>_SUMMARY_MODEL`, and `AGENTPING_<AGENT>_SUMMARY_TIMEOUT_MS`. An Agent never falls back to another Agent's key, so source separation is preserved.
-`AGENTPING_CLAUDE_SUMMARY_MODEL` overrides the Claude summary model; the default is `haiku`.
+`AGENTPING_CLAUDE_SUMMARY_MODEL` overrides the Claude summary model; the default is `sonnet`.
 `AGENTPING_SUMMARY_MODEL`, `AGENTPING_SUMMARY_MIN_CHARS`, `AGENTPING_SUMMARY_MAX_CHARS`, `AGENTPING_SUMMARY_FALLBACK_TEXT`, and `AGENTPING_LLM_TIMEOUT_MS` override the stored summary settings.
 Summary length is prompt-guided, not hard-truncated. A slightly longer complete sentence is accepted, but an excessively long result or an apparent copy of the final answer is rejected. Timeout, command failure, empty output, and rejected output use `summaryFallbackText`, whose default is `摘要未生成，请看原回答`.
 The summary model receives the full user prompt and full final answer so the generated notification title is based on complete context.
@@ -317,7 +317,7 @@ agentping config set-summary-range 50 100
 agentping config set-summary-fallback "摘要未生成，请看原回答"
 agentping config set-timeout 15000
 agentping config set-desp-max -1
-agentping config set-separator "\n\n---\n\n"
+agentping config set-separator "\n***\n"
 agentping config set-mode long_only --min-duration-ms 10000
 agentping config set-mode long_only --min-duration-ms 30000
 agentping config set-mode off

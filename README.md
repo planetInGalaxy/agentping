@@ -13,7 +13,7 @@ AgentPing uses Codex `notify` with the `agent-turn-complete` event. It does not 
 - Summarizes the full user question and assistant answer with `codex exec`.
 - Sends the summary in PushDeer `text`.
 - Sends a separator plus the original assistant answer in PushDeer `desp`, truncated to `despMaxChars`.
-- Asks the summary model for 30 to 60 Chinese characters by default.
+- Asks the summary model for 50 to 100 Chinese characters by default.
 - Does not hard-truncate LLM summaries; semantic completeness is preferred if the model slightly exceeds the configured range.
 - Keeps the default `desp` at or below 300 characters.
 - Supports notification modes: always, long tasks only, errors only, or off.
@@ -157,8 +157,8 @@ The notifier config stores local runtime settings:
   "pushkey": "PDU...",
   "endpoint": "https://api2.pushdeer.com/message/push",
   "summaryModel": "gpt-5.6-terra",
-  "summaryMinChars": 30,
-  "summaryMaxChars": 60,
+  "summaryMinChars": 50,
+  "summaryMaxChars": 100,
   "llmTimeoutMs": 16000,
   "despMaxChars": 300,
   "despSeparator": "\n-----\n",
@@ -176,7 +176,11 @@ The notifier config stores local runtime settings:
 }
 ```
 
-Project-level settings can be stored in `.agentping.json` or `agentping.config.json` in a project directory. AgentPing searches upward from the current working directory and overlays that file on top of the user config. Project config intentionally ignores `pushkey`/`pushKey`, so secrets stay in `~/.config/agentping/config.json`.
+The user-level file `~/.config/agentping/config.json` is the global base configuration and applies to every project. Each setting written by AgentPing is followed by a `fieldName__说明` entry in Chinese; these explanation entries are documentation only and do not affect runtime behavior.
+
+Project-level settings can be stored in `.agentping.json` or `agentping.config.json` in a project directory. AgentPing starts at the current working directory, searches upward for the nearest project config, and overlays its values on top of the global config. Only settings that differ for that project need to be included. Project config intentionally ignores `pushkey`/`pushKey`, so secrets stay in `~/.config/agentping/config.json`.
+
+Create a documented project config in the current project with `agentping config init-project`. Use `agentping config show` from that project to inspect the effective merged configuration and the project config path that was found.
 
 ## Runtime Settings
 
@@ -184,8 +188,8 @@ Optional environment variables:
 
 ```bash
 export AGENTPING_SUMMARY_MODEL=gpt-5.6-terra
-export AGENTPING_SUMMARY_MIN_CHARS=30
-export AGENTPING_SUMMARY_MAX_CHARS=60
+export AGENTPING_SUMMARY_MIN_CHARS=50
+export AGENTPING_SUMMARY_MAX_CHARS=100
 export AGENTPING_LLM_TIMEOUT_MS=16000
 export AGENTPING_DESP_MAX_CHARS=300
 export AGENTPING_DESP_SEPARATOR='\n-----\n'
@@ -208,7 +212,7 @@ export AGENTPING_PUSHDEER_KEY='PDU...'
 `AGENTPING_SUMMARY_MODEL`, `AGENTPING_SUMMARY_MIN_CHARS`, `AGENTPING_SUMMARY_MAX_CHARS`, and `AGENTPING_LLM_TIMEOUT_MS` override the stored summary settings.
 Summary length is prompt-guided, not enforced by hard truncation. If the model returns a slightly longer complete sentence, the notifier sends it as-is.
 The summary model receives the full user prompt and full final answer so the generated notification title is based on complete context.
-`AGENTPING_DESP_MAX_CHARS` overrides the stored `desp` truncation limit. The default is 300 characters; explicit values are capped to 1000. Set it to `0` to omit `desp`.
+`AGENTPING_DESP_MAX_CHARS` overrides the stored `desp` truncation limit. The default is 300 characters; positive values are capped to 1000. Set it to `-1` to keep the complete rendered `desp`, or `0` to omit `desp`.
 `AGENTPING_DESP_SEPARATOR` overrides the marker placed before the original answer in `desp`; escaped `\n` sequences are converted to newlines. Set it to an empty string to omit the marker.
 `AGENTPING_FINAL_WAIT_MS` controls how long a notify event waits for the Codex session file to show `task_complete`. Intermediate events are skipped if no completed final answer appears within that window.
 `AGENTPING_NOTIFY_MODE` controls whether automatic notifications send. Valid values are `always`, `long_only`, `errors_only`, and `off`. The default is `always`.
@@ -217,7 +221,7 @@ The summary model receives the full user prompt and full final answer so the gen
 `AGENTPING_DEBUG_LOGS=1` allows local logs to include redacted title/desp/stderr previews. By default logs keep operational metadata such as lengths, status, summary source, elapsed time, and errors.
 `AGENTPING_TITLE_TEMPLATE` and `AGENTPING_DESP_TEMPLATE` customize PushDeer fields. Supported placeholders are `{summary}`, `{finalText}`, `{finalTextPreview}`, `{separator}`, `{duration}`, `{durationZh}`, `{turnId}`, `{terminalType}`, `{summarySource}`, `{summaryModel}`, and `{summaryElapsedMs}`.
 `{duration}` is compact English-style timing such as `12.3s`; `{durationZh}` is Chinese minute/second timing such as `0分 12秒`.
-`{finalTextPreview}` keeps the first `finalTextPreviewHeadChars` characters, then `finalTextPreviewMarker`, then the last `finalTextPreviewTailChars` characters.
+`{finalTextPreview}` keeps approximately the first `finalTextPreviewHeadChars` characters and last `finalTextPreviewTailChars` characters, extending slightly when needed to end and begin at nearby punctuation boundaries. It inserts `finalTextPreviewMarker` between both sections.
 `AGENTPING_PROJECT_CONFIG=/path/to/.agentping.json` forces a project config file; `AGENTPING_DISABLE_PROJECT_CONFIG=1` disables project config discovery.
 
 Legacy `CODEX_PUSHDEER_*` variables and the old `~/.config/codex-pushdeer-notifier/config.json` config file are still read during migration. New writes go to `~/.config/agentping/config.json`.
@@ -229,7 +233,7 @@ Show PushDeer config status:
 ```bash
 npm run config:show
 agentping config show
-agentping config set-summary-range 30 60
+agentping config set-summary-range 50 100
 agentping config set-timeout 15000
 agentping config set-desp-max 300
 agentping config set-separator "\n-----\n"

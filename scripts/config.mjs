@@ -23,6 +23,7 @@ import {
   NOTIFY_MODES,
   PROJECT_CONFIG_FILES,
   configPath,
+  configWithChineseComments,
   configSourcePath,
   loadConfig,
   normalizeBoolean,
@@ -57,7 +58,7 @@ function usage() {
     "  unset-key                    Remove stored PushDeer key",
     "  set-summary-range <min> <max> Configure LLM summary length",
     "  set-timeout <ms>             Configure LLM summary timeout",
-    "  set-desp-max <chars>         Configure desp truncation length, 0 disables desp",
+    "  set-desp-max <chars>         Configure desp length; -1 unlimited, 0 disables desp",
     "  set-separator <text>         Configure desp separator, supports \\n",
     "  disable-separator            Disable desp separator",
     "  set-final-wait <ms>          Configure final answer wait window",
@@ -167,7 +168,12 @@ function setTimeoutMs() {
 
 function setDespMax() {
   const despMaxChars = normalizeDespMaxChars(numberValue(1, "desp max chars", "chars"));
-  savePatch({ despMaxChars }, `Configured PushDeer desp max length ${despMaxChars} chars`);
+  savePatch(
+    { despMaxChars },
+    despMaxChars < 0
+      ? "Configured PushDeer desp without a total length limit"
+      : `Configured PushDeer desp max length ${despMaxChars} chars`,
+  );
 }
 
 function setSeparator() {
@@ -262,7 +268,7 @@ function initProjectConfig() {
     console.error(`${target} already exists. Re-run with --force to overwrite it.`);
     process.exit(2);
   }
-  writeJson0600(target, {
+  writeJson0600(target, configWithChineseComments({
     summaryModel: DEFAULT_SUMMARY_MODEL,
     summaryMinChars: DEFAULT_SUMMARY_MIN_CHARS,
     summaryMaxChars: DEFAULT_SUMMARY_MAX_CHARS,
@@ -277,7 +283,7 @@ function initProjectConfig() {
     finalTextPreviewHeadChars: DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS,
     finalTextPreviewTailChars: DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS,
     finalTextPreviewMarker: DEFAULT_FINAL_TEXT_PREVIEW_MARKER,
-  });
+  }));
   console.log(`Created project AgentPing config at ${target}`);
 }
 

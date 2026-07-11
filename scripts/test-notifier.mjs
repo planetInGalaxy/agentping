@@ -12,6 +12,7 @@ import {
   charLength,
   codexSummaryExecArgs,
   codexTransportDiagnostics,
+  configWithChineseComments,
   fallbackDescription,
   formatFinalTextPreview,
   formatNotificationFields,
@@ -59,8 +60,8 @@ function makeTempWorkspace() {
   fs.mkdirSync(cwd, { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify({
     endpoint: "https://api2.pushdeer.com/message/push",
-    summaryMinChars: 30,
-    summaryMaxChars: 60,
+    summaryMinChars: 50,
+    summaryMaxChars: 100,
     llmTimeoutMs: 3000,
     despMaxChars: 300,
     despSeparator: DEFAULT_DESP_SEPARATOR,
@@ -202,6 +203,12 @@ function readLog(workspace) {
 }
 
 function testFormatHelpers() {
+  const documentedConfig = configWithChineseComments({
+    summaryMinChars: 50,
+    summaryMaxChars: 100,
+  });
+  assert.match(documentedConfig.summaryMinChars__说明, /Prompt/u);
+  assert.match(documentedConfig.summaryMaxChars__说明, /不会强制截断/u);
   const { summaryMinChars, summaryMaxChars } = normalizeSummaryCharBounds(60, 30);
   assert.equal(summaryMinChars, 60);
   assert.equal(summaryMaxChars, 60);
@@ -242,6 +249,29 @@ function testFormatHelpers() {
   assert.equal(preview.slice(0, 10), "0123456789");
   assert.match(preview, /\n\.\.\.\.\.\.\n/u);
   assert.equal(preview.slice(-10), "0123456789");
+
+  const punctuatedText = "开头内容一。开头内容二继续补充。中间内容会被省略，因为这里足够长。结尾部分从完整句子开始。最后结论完整保留。";
+  const punctuatedPreview = formatFinalTextPreview(punctuatedText, {
+    headChars: 8,
+    tailChars: 8,
+    marker: "\n......\n",
+  });
+  assert.equal(punctuatedPreview, "开头内容一。开头内容二继续补充。\n......\n最后结论完整保留。");
+
+  const unlimitedFields = formatNotificationFields({
+    summary: "任务完成",
+    finalText: punctuatedText,
+    config: {
+      despMaxChars: -1,
+      despSeparator: "\n---\n",
+      despTemplate: "{separator}{finalTextPreview}",
+      finalTextPreviewHeadChars: 8,
+      finalTextPreviewTailChars: 8,
+      finalTextPreviewMarker: "\n......\n",
+    },
+  });
+  assert.equal(unlimitedFields.desp, `\n---\n${punctuatedPreview}`);
+  assert.ok(charLength(unlimitedFields.desp) > 8 + 8);
 
   const execArgs = codexSummaryExecArgs({
     model: "gpt-5.4-mini",
@@ -329,6 +359,7 @@ function testLlmSummaryIsUsedWhole() {
     assert.match(log, /summaryElapsedMs/u);
     assert.ok(capture.args.includes("model_provider=\"agentping-openai\""));
     assert.ok(capture.args.includes("model_providers.agentping-openai.supports_websockets=false"));
+    assert.match(capture.args.at(-1), /期望长度：50到100个汉字/u);
     assert.match(capture.input, /这是一个很长的最终回答。它包含结论、代码修改、验证结果和后续建议，不能只截取开头。/u);
     assert.match(log, /LLM summary generated/u);
     assert.match(log, /"transport":"unknown"/u);

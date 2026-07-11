@@ -7,8 +7,8 @@ export const DEFAULT_ENDPOINT = "https://api2.pushdeer.com/message/push";
 export const APP_NAME = "agentping";
 export const LEGACY_APP_NAME = "codex-pushdeer-notifier";
 export const DEFAULT_SUMMARY_MODEL = "gpt-5.6-terra";
-export const DEFAULT_SUMMARY_MIN_CHARS = 30;
-export const DEFAULT_SUMMARY_MAX_CHARS = 60;
+export const DEFAULT_SUMMARY_MIN_CHARS = 50;
+export const DEFAULT_SUMMARY_MAX_CHARS = 100;
 export const DEFAULT_LLM_TIMEOUT_MS = 16_000;
 export const DEFAULT_DESP_MAX_CHARS = 300;
 export const MAX_DESP_MAX_CHARS = 1000;
@@ -28,6 +28,40 @@ export const CODEX_SUMMARY_PROVIDER = "agentping-openai";
 export const CODEX_SUMMARY_BASE_URL = "https://chatgpt.com/backend-api/codex";
 export const NOTIFY_MODES = ["always", "long_only", "errors_only", "off"];
 export const PROJECT_CONFIG_FILES = [".agentping.json", "agentping.config.json"];
+
+export const CONFIG_FIELD_COMMENTS = {
+  pushkey: "PushDeer 推送密钥，仅应保存在全局配置中；项目配置里的密钥会被忽略。",
+  endpoint: "PushDeer 服务端的消息推送接口地址。",
+  summaryModel: "用于生成通知摘要的 Codex 模型。",
+  summaryMinChars: "LLM 摘要期望的最少汉字数，会动态写入摘要 Prompt。",
+  summaryMaxChars: "LLM 摘要期望的最多汉字数，会动态写入摘要 Prompt；为保证语句完整不会强制截断。",
+  llmTimeoutMs: "等待 LLM 生成摘要的最长毫秒数；超时后改用本地摘要。",
+  despMaxChars: "PushDeer desp 正文的最大字符数，-1 表示不限制总长度，0 表示不发送 desp，正数最大允许 1000。",
+  despSeparator: "摘要标题与原始回答正文之间使用的分隔符。",
+  finalWaitMs: "收到 Codex 通知事件后，等待会话写入完整最终回答的最长毫秒数。",
+  notifyMode: "通知模式：always 总是通知、long_only 仅耗时任务、errors_only 仅错误、off 关闭。",
+  minDurationMs: "notifyMode 为 long_only 时，达到该耗时毫秒数才发送通知。",
+  logMaxBytes: "单个本地日志文件的最大字节数，0 表示不轮转。",
+  logKeepFiles: "日志轮转后保留的历史文件数量。",
+  debugLogs: "是否在本地日志中记录已脱敏的文本预览和错误输出，排查问题时再开启。",
+  titleTemplate: "PushDeer 标题模板，可使用 AgentPing 支持的模板变量。",
+  despTemplate: "PushDeer desp 正文模板，可使用 AgentPing 支持的模板变量。",
+  finalTextPreviewHeadChars: "{finalTextPreview} 保留原始回答开头的字符数。",
+  finalTextPreviewTailChars: "{finalTextPreview} 保留原始回答末尾的字符数。",
+  finalTextPreviewMarker: "{finalTextPreview} 省略中间内容时插入的标记。",
+};
+
+export function configWithChineseComments(config) {
+  const output = {};
+  for (const [key, value] of Object.entries(config || {})) {
+    if (key.endsWith("__说明")) continue;
+    output[key] = value;
+    if (CONFIG_FIELD_COMMENTS[key]) {
+      output[`${key}__说明`] = CONFIG_FIELD_COMMENTS[key];
+    }
+  }
+  return output;
+}
 
 export function expandHome(value) {
   if (!value) return value;
@@ -393,10 +427,10 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
 
 export function saveConfigPatch(patch) {
   const current = readJsonIfExists(configPath(), null) ?? readJsonIfExists(configSourcePath(), {});
-  writeJson0600(configPath(), {
+  writeJson0600(configPath(), configWithChineseComments({
     ...current,
     ...patch,
-  });
+  }));
 }
 
 export function hashText(value) {
@@ -465,7 +499,7 @@ export function normalizeSummaryCharBounds(minValue, maxValue) {
 export function normalizeDespMaxChars(value) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return DEFAULT_DESP_MAX_CHARS;
-  if (parsed < 0) return 0;
+  if (parsed < 0) return -1;
   return Math.min(parsed, MAX_DESP_MAX_CHARS);
 }
 
@@ -608,7 +642,8 @@ export function rotateLogIfNeeded({ force = false } = {}) {
 
 export function truncateDesp(finalText, maxChars = DEFAULT_DESP_MAX_CHARS) {
   const normalizedMax = normalizeDespMaxChars(maxChars);
-  if (normalizedMax <= 0) return "";
+  if (normalizedMax < 0) return String(finalText || "");
+  if (normalizedMax === 0) return "";
   return takeChars(String(finalText || ""), normalizedMax);
 }
 
@@ -621,9 +656,10 @@ export function formatDesp(
 ) {
   const text = String(finalText || "");
   const normalizedMax = normalizeDespMaxChars(maxChars);
-  if (!text || normalizedMax <= 0) return "";
+  if (!text || normalizedMax === 0) return "";
 
   const normalizedSeparator = normalizeDespSeparator(separator);
+  if (normalizedMax < 0) return `${normalizedSeparator}${text}`;
   if (!normalizedSeparator) return takeChars(text, normalizedMax);
 
   const separatorText = takeChars(normalizedSeparator, normalizedMax);
@@ -659,11 +695,45 @@ export function formatFinalTextPreview(finalText, {
   const normalizedHead = normalizePreviewChars(headChars, DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS);
   const normalizedTail = normalizePreviewChars(tailChars, DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS);
   if (chars.length <= normalizedHead + normalizedTail) return text;
+  const headEnd = previewHeadBoundary(chars, normalizedHead);
+  const tailStart = previewTailBoundary(chars, normalizedTail);
+  if (headEnd >= tailStart) return text;
   return [
-    chars.slice(0, normalizedHead).join(""),
+    chars.slice(0, headEnd).join(""),
     normalizeDespSeparator(marker),
-    chars.slice(Math.max(0, chars.length - normalizedTail)).join(""),
+    chars.slice(tailStart).join(""),
   ].join("");
+}
+
+const STRONG_PREVIEW_BOUNDARIES = new Set(["。", "！", "？", "；", ".", "!", "?", ";", "\n"]);
+const WEAK_PREVIEW_BOUNDARIES = new Set(["，", "、", "：", ",", ":"]);
+
+function previewBoundaryOvershoot(targetChars) {
+  return Math.max(20, Math.min(80, Math.round(targetChars * 0.25)));
+}
+
+function previewHeadBoundary(chars, targetChars) {
+  if (targetChars <= 0) return 0;
+  const target = Math.min(targetChars, chars.length);
+  const limit = Math.min(chars.length, target + previewBoundaryOvershoot(targetChars));
+  for (const boundaries of [STRONG_PREVIEW_BOUNDARIES, WEAK_PREVIEW_BOUNDARIES]) {
+    for (let index = target - 1; index < limit; index += 1) {
+      if (boundaries.has(chars[index])) return index + 1;
+    }
+  }
+  return target;
+}
+
+function previewTailBoundary(chars, targetChars) {
+  if (targetChars <= 0) return chars.length;
+  const target = Math.max(0, chars.length - targetChars);
+  const limit = Math.max(0, target - previewBoundaryOvershoot(targetChars));
+  for (const boundaries of [STRONG_PREVIEW_BOUNDARIES, WEAK_PREVIEW_BOUNDARIES]) {
+    for (let index = target - 1; index >= limit; index -= 1) {
+      if (boundaries.has(chars[index])) return index + 1;
+    }
+  }
+  return target;
 }
 
 export function renderTemplate(template, context = {}) {
@@ -713,16 +783,16 @@ export function formatNotificationFields({
   };
   const title = normalizeWhitespace(renderTemplate(normalizedConfig.titleTemplate, context)) ||
     normalizeWhitespace(summary);
-  if (normalizedConfig.despMaxChars <= 0) {
+  if (normalizedConfig.despMaxChars === 0) {
     return {
       title,
       desp: "",
     };
   }
-  const desp = takeChars(
-    renderTemplate(normalizedConfig.despTemplate, context),
-    normalizedConfig.despMaxChars,
-  );
+  const renderedDesp = renderTemplate(normalizedConfig.despTemplate, context);
+  const desp = normalizedConfig.despMaxChars < 0
+    ? renderedDesp
+    : takeChars(renderedDesp, normalizedConfig.despMaxChars);
   return {
     title,
     desp,

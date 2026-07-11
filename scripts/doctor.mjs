@@ -205,8 +205,8 @@ const checks = {
     detail: `${config.summaryMinChars}-${config.summaryMaxChars} chars, default ${DEFAULT_SUMMARY_MIN_CHARS}-${DEFAULT_SUMMARY_MAX_CHARS}`,
   },
   despMaxChars: {
-    ok: config.despMaxChars >= 0 && config.despMaxChars <= MAX_DESP_MAX_CHARS,
-    detail: `${config.despMaxChars} chars`,
+    ok: config.despMaxChars >= -1 && config.despMaxChars <= MAX_DESP_MAX_CHARS,
+    detail: config.despMaxChars < 0 ? "unlimited" : `${config.despMaxChars} chars`,
   },
   despSeparator: {
     ok: typeof config.despSeparator === "string",

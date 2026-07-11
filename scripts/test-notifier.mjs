@@ -12,7 +12,6 @@ import {
   charLength,
   fallbackDescription,
   formatFinalTextPreview,
-  formatMiddlePreview,
   formatNotificationFields,
   formatDesp,
   loadConfig,
@@ -60,7 +59,6 @@ function makeTempWorkspace() {
     endpoint: "https://api2.pushdeer.com/message/push",
     summaryMinChars: 30,
     summaryMaxChars: 60,
-    summaryInputMaxChars: 6000,
     llmTimeoutMs: 3000,
     despMaxChars: 300,
     despSeparator: DEFAULT_DESP_SEPARATOR,
@@ -242,9 +240,6 @@ function testFormatHelpers() {
   assert.equal(preview.slice(0, 10), "0123456789");
   assert.match(preview, /\n\.\.\.\.\.\.\n/u);
   assert.equal(preview.slice(-10), "0123456789");
-  const middlePreview = formatMiddlePreview(longText, 60, "\n......\n");
-  assert.equal(charLength(middlePreview), 60);
-  assert.match(middlePreview, /\n\.\.\.\.\.\.\n/u);
 }
 
 function testFinalOnlyNotification() {

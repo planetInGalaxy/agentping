@@ -204,12 +204,6 @@ const checks = {
     ok: config.summaryMinChars >= 0 && config.summaryMaxChars >= config.summaryMinChars,
     detail: `${config.summaryMinChars}-${config.summaryMaxChars} chars, default ${DEFAULT_SUMMARY_MIN_CHARS}-${DEFAULT_SUMMARY_MAX_CHARS}`,
   },
-  summaryInput: {
-    ok: config.summaryInputMaxChars >= 0,
-    detail: config.summaryInputMaxChars > 0
-      ? `${config.summaryInputMaxChars} chars sent to summary model`
-      : "uncapped",
-  },
   despMaxChars: {
     ok: config.despMaxChars >= 0 && config.despMaxChars <= MAX_DESP_MAX_CHARS,
     detail: `${config.despMaxChars} chars`,

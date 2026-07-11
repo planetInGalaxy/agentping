@@ -159,7 +159,6 @@ The notifier config stores local runtime settings:
   "summaryModel": "gpt-5.6-terra",
   "summaryMinChars": 30,
   "summaryMaxChars": 60,
-  "summaryInputMaxChars": 6000,
   "llmTimeoutMs": 16000,
   "despMaxChars": 300,
   "despSeparator": "\n-----\n",
@@ -187,7 +186,6 @@ Optional environment variables:
 export AGENTPING_SUMMARY_MODEL=gpt-5.6-terra
 export AGENTPING_SUMMARY_MIN_CHARS=30
 export AGENTPING_SUMMARY_MAX_CHARS=60
-export AGENTPING_SUMMARY_INPUT_MAX_CHARS=6000
 export AGENTPING_LLM_TIMEOUT_MS=16000
 export AGENTPING_DESP_MAX_CHARS=300
 export AGENTPING_DESP_SEPARATOR='\n-----\n'
@@ -209,7 +207,7 @@ export AGENTPING_PUSHDEER_KEY='PDU...'
 `AGENTPING_PUSHDEER_KEY`, `AGENTPING_KEY`, and `PUSHDEER_KEY` override the stored config key.
 `AGENTPING_SUMMARY_MODEL`, `AGENTPING_SUMMARY_MIN_CHARS`, `AGENTPING_SUMMARY_MAX_CHARS`, and `AGENTPING_LLM_TIMEOUT_MS` override the stored summary settings.
 Summary length is prompt-guided, not enforced by hard truncation. If the model returns a slightly longer complete sentence, the notifier sends it as-is.
-`AGENTPING_SUMMARY_INPUT_MAX_CHARS` limits how much of the user prompt and final answer is sent to the summary model. Long text is reduced to a first/last preview before summarization. Set it to `0` to send the full text.
+The summary model receives the full user prompt and full final answer so the generated notification title is based on complete context.
 `AGENTPING_DESP_MAX_CHARS` overrides the stored `desp` truncation limit. The default is 300 characters; explicit values are capped to 1000. Set it to `0` to omit `desp`.
 `AGENTPING_DESP_SEPARATOR` overrides the marker placed before the original answer in `desp`; escaped `\n` sequences are converted to newlines. Set it to an empty string to omit the marker.
 `AGENTPING_FINAL_WAIT_MS` controls how long a notify event waits for the Codex session file to show `task_complete`. Intermediate events are skipped if no completed final answer appears within that window.

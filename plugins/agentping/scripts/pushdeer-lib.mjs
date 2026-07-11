@@ -9,7 +9,6 @@ export const LEGACY_APP_NAME = "codex-pushdeer-notifier";
 export const DEFAULT_SUMMARY_MODEL = "gpt-5.6-terra";
 export const DEFAULT_SUMMARY_MIN_CHARS = 30;
 export const DEFAULT_SUMMARY_MAX_CHARS = 60;
-export const DEFAULT_SUMMARY_INPUT_MAX_CHARS = 6000;
 export const DEFAULT_LLM_TIMEOUT_MS = 16_000;
 export const DEFAULT_DESP_MAX_CHARS = 300;
 export const MAX_DESP_MAX_CHARS = 1000;
@@ -242,13 +241,6 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
       String(DEFAULT_SUMMARY_MAX_CHARS),
     10,
   );
-  const summaryInputMaxChars = Number.parseInt(
-    envValue("AGENTPING_SUMMARY_INPUT_MAX_CHARS", "CODEX_PUSHDEER_SUMMARY_INPUT_MAX_CHARS") ??
-      config.summaryInputMaxChars ??
-      config.summary_input_max_chars ??
-      String(DEFAULT_SUMMARY_INPUT_MAX_CHARS),
-    10,
-  );
   const llmTimeoutMs = Number.parseInt(
     envValue("AGENTPING_LLM_TIMEOUT_MS", "CODEX_PUSHDEER_LLM_TIMEOUT_MS") ||
       config.llmTimeoutMs ||
@@ -343,7 +335,6 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     pushkey,
     summaryModel,
     ...summaryBounds,
-    summaryInputMaxChars: normalizeSummaryInputMaxChars(summaryInputMaxChars),
     llmTimeoutMs: Number.isFinite(llmTimeoutMs) && llmTimeoutMs > 0
       ? llmTimeoutMs
       : DEFAULT_LLM_TIMEOUT_MS,
@@ -432,13 +423,6 @@ export function normalizeSummaryCharBounds(minValue, maxValue) {
     summaryMinChars,
     summaryMaxChars,
   };
-}
-
-export function normalizeSummaryInputMaxChars(value) {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) return DEFAULT_SUMMARY_INPUT_MAX_CHARS;
-  if (parsed <= 0) return 0;
-  return Math.min(parsed, 100_000);
 }
 
 export function normalizeDespMaxChars(value) {
@@ -642,25 +626,6 @@ export function formatFinalTextPreview(finalText, {
     chars.slice(0, normalizedHead).join(""),
     normalizeDespSeparator(marker),
     chars.slice(Math.max(0, chars.length - normalizedTail)).join(""),
-  ].join("");
-}
-
-export function formatMiddlePreview(text, maxChars, marker = DEFAULT_FINAL_TEXT_PREVIEW_MARKER) {
-  const value = String(text || "");
-  const normalizedMax = normalizeSummaryInputMaxChars(maxChars);
-  if (!value || normalizedMax <= 0) return value;
-  const chars = Array.from(value);
-  if (chars.length <= normalizedMax) return value;
-  const normalizedMarker = normalizeDespSeparator(marker);
-  const markerChars = charLength(normalizedMarker);
-  if (normalizedMax <= markerChars) return takeChars(value, normalizedMax);
-  const remaining = normalizedMax - markerChars;
-  const headChars = Math.ceil(remaining * 0.7);
-  const tailChars = remaining - headChars;
-  return [
-    chars.slice(0, headChars).join(""),
-    normalizedMarker,
-    chars.slice(Math.max(0, chars.length - tailChars)).join(""),
   ].join("");
 }
 

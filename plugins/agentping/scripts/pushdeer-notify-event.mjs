@@ -9,7 +9,6 @@ import {
   DEFAULT_SUMMARY_MODEL,
   extractTurnId,
   findLatestFinalMessage,
-  formatMiddlePreview,
   formatNotificationFields,
   hashText,
   envValue,
@@ -80,7 +79,6 @@ function summarizeWithCodex({ finalText, notification }) {
   const timeoutMs = config.llmTimeoutMs || DEFAULT_LLM_TIMEOUT_MS;
   const summaryMinChars = config.summaryMinChars;
   const summaryMaxChars = config.summaryMaxChars;
-  const summaryInputMaxChars = config.summaryInputMaxChars;
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentping-summary-"));
   const outputFile = path.join(tempDir, "summary.txt");
   const prompt = [
@@ -90,18 +88,12 @@ function summarizeWithCodex({ finalText, notification }) {
     "不要描述过程，不要说“我查看了/我会/正在”，除非过程本身就是最终结果；不要截取开头；不要输出标题、引号、编号、解释、密钥、token、完整长路径或长 URL。",
     "完整性优先：不要以半句话、顿号、连接词或省略号结尾；如果长度和完整性冲突，宁可略超也不要截断。",
   ].join("\n");
-  const userInputMaxChars = summaryInputMaxChars > 0
-    ? Math.min(summaryInputMaxChars, 2000)
-    : 0;
   const input = [
     "用户问题：",
-    formatMiddlePreview(
-      redactText(inputMessagesText(notification)),
-      userInputMaxChars,
-    ) || "未提供",
+    redactText(inputMessagesText(notification)) || "未提供",
     "",
     "助手完整回答：",
-    formatMiddlePreview(redactText(finalText), summaryInputMaxChars),
+    redactText(finalText),
   ].join("\n");
   const startedAt = Date.now();
 

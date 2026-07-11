@@ -87,7 +87,6 @@ if (args.show) {
     summaryModel: config.summaryModel,
     summaryMinChars: config.summaryMinChars,
     summaryMaxChars: config.summaryMaxChars,
-    summaryInputMaxChars: config.summaryInputMaxChars,
     llmTimeoutMs: config.llmTimeoutMs,
     despMaxChars: config.despMaxChars,
     despSeparator: config.despSeparator,

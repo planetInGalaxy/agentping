@@ -1,6 +1,6 @@
 {
   "name": "agentping",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Notify when your AI agents finish and send concise completion summaries.",
   "private": false,
   "keywords": [
@@ -31,6 +31,8 @@
     "bin/",
     "plugins/",
     "integrations/",
+    "!integrations/**/__pycache__/**",
+    "!integrations/**/*.pyc",
     "scripts/",
     "README.md",
     "package.json"

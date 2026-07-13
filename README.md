@@ -10,6 +10,7 @@ Each platform adapter only converts its native completion hook into AgentPing's 
 
 - Runs after a Codex, Claude Code, OpenClaw, or Hermes answer is complete.
 - Ignores intermediate commentary/status messages and waits for Codex session `task_complete`.
+- In Codex multi-agent tasks, ignores child Agent completions and notifies only when the top-level user task completes.
 - Summarizes the full user question and assistant answer through the configured summary provider: `codex exec`, a safe non-persistent Claude print process, or no LLM summary.
 - Sends the summary in PushDeer `text`.
 - Sends a separator plus the original assistant answer in PushDeer `desp`, truncated to `despMaxChars`.

@@ -130,6 +130,9 @@ function cleanupTempWorkspace(workspace) {
 
 function writeSession(workspace, {
   turnId = "turn-test",
+  sessionId = `session-${turnId}`,
+  parentThreadId = "",
+  threadSource = "user",
   includeFinal = true,
   startedAt = "2026-07-08T09:00:00.000Z",
   completedAt = "2026-07-08T09:02:00.000Z",
@@ -138,6 +141,26 @@ function writeSession(workspace, {
 } = {}) {
   const filePath = path.join(workspace.sessionDir, `${turnId}.jsonl`);
   const lines = [
+    {
+      timestamp: startedAt,
+      type: "session_meta",
+      payload: {
+        id: sessionId,
+        session_id: parentThreadId || sessionId,
+        ...(parentThreadId ? { parent_thread_id: parentThreadId } : {}),
+        thread_source: threadSource,
+        ...(threadSource === "subagent" ? {
+          source: {
+            subagent: {
+              thread_spawn: {
+                parent_thread_id: parentThreadId,
+                depth: 1,
+              },
+            },
+          },
+        } : {}),
+      },
+    },
     {
       timestamp: startedAt,
       type: "turn_context",
@@ -489,6 +512,36 @@ function testFinalOnlyNotification() {
       AGENTPING_DISABLE_LLM_SUMMARY: "1",
     });
     assert.match(readLog(workspace), /PushDeer notify event sent/u);
+  } finally {
+    cleanupTempWorkspace(workspace);
+  }
+}
+
+function testSubagentNotificationSuppressed() {
+  const workspace = makeTempWorkspace();
+  try {
+    const turnId = "turn-subagent-complete";
+    writeSession(workspace, {
+      turnId,
+      sessionId: "child-agent-session",
+      parentThreadId: "top-level-user-session",
+      threadSource: "subagent",
+      userText: "检查候选稿并返回审阅结果",
+      finalText: "子 Agent 已完成候选稿审阅，但主任务仍在继续。",
+    });
+    runEvent(workspace, {
+      type: "agent-turn-complete",
+      "turn-id": turnId,
+      "input-messages": [{ text: "子 Agent 完成事件" }],
+    }, {
+      AGENTPING_DISABLE_LLM_SUMMARY: "1",
+    });
+
+    const log = readLog(workspace);
+    assert.match(log, /Skipping Codex subagent completion event/u);
+    assert.match(log, /"parentSessionId":"top-level-user-session"/u);
+    assert.doesNotMatch(log, /AgentPing completion event queued/u);
+    assert.doesNotMatch(log, /PushDeer notify event sent/u);
   } finally {
     cleanupTempWorkspace(workspace);
   }
@@ -1117,6 +1170,20 @@ function testRuntimeInstallAndRollback() {
     installRuntime({ projectRoot, version: "0.6.0-test" });
     assert.equal(runtimeStatus().currentVersion, "0.6.0-test");
     assert.equal(runtimeStatus().previousVersion, "0.5.9-test");
+    const installedNotifier = path.join(
+      runtimeStatus().resolvedPath,
+      "plugins",
+      "agentping",
+      "scripts",
+      "pushdeer-notify-event.mjs",
+    );
+    fs.writeFileSync(installedNotifier, "stale same-version runtime");
+    installRuntime({ projectRoot, version: "0.6.0-test" });
+    assert.equal(
+      fs.readFileSync(installedNotifier, "utf8"),
+      fs.readFileSync(path.join(projectRoot, "plugins", "agentping", "scripts", "pushdeer-notify-event.mjs"), "utf8"),
+    );
+    assert.equal(runtimeStatus().previousVersion, "0.5.9-test");
     const rolledBack = rollbackRuntime();
     assert.equal(rolledBack.version, "0.5.9-test");
     assert.equal(runtimeStatus().currentVersion, "0.5.9-test");
@@ -1183,6 +1250,7 @@ const tests = {
   format: () => test("format helpers", testFormatHelpers),
   config_migration: () => test("config field migration", testConfigFieldMigration),
   final: () => test("final-only notification", testFinalOnlyNotification),
+  subagent: () => test("Codex subagent completion is suppressed", testSubagentNotificationSuppressed),
   summary: () => test("LLM summary is used whole", testLlmSummaryIsUsedWhole),
   summary_fallback: () => test("invalid LLM summary uses fixed fallback", testInvalidLlmSummaryUsesFixedFallback),
   logs: () => test("log rotation", testLogRotation),
@@ -1206,6 +1274,7 @@ if (command === "all") {
   await tests.format();
   await tests.config_migration();
   await tests.final();
+  await tests.subagent();
   await tests.summary();
   await tests.summary_fallback();
   await tests.logs();
@@ -1225,7 +1294,7 @@ if (command === "all") {
 } else if (tests[command]) {
   await tests[command]();
 } else {
-  console.error("Usage: agentping test [all|format|config_migration|final|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
+  console.error("Usage: agentping test [all|format|config_migration|final|subagent|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
   process.exit(2);
 }
 

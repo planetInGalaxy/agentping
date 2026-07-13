@@ -56,17 +56,28 @@ export function installRuntime({ projectRoot, version, dryRun = false } = {}) {
   const previousVersion = currentVersion();
   if (dryRun) return { currentPath: runtimeCurrentPath(), versionDirectory, previousVersion, changed: true };
 
-  if (!fs.existsSync(versionDirectory)) {
-    const staging = `${versionDirectory}.${process.pid}.staging`;
-    fs.rmSync(staging, { recursive: true, force: true });
-    fs.mkdirSync(staging, { recursive: true });
-    for (const name of ["plugins", "integrations"]) {
-      const source = path.join(projectRoot, name);
-      if (fs.existsSync(source)) fs.cpSync(source, path.join(staging, name), { recursive: true });
-    }
-    fs.copyFileSync(path.join(projectRoot, "package.json"), path.join(staging, "package.json"));
-    fs.mkdirSync(path.dirname(versionDirectory), { recursive: true });
+  const staging = `${versionDirectory}.${process.pid}.staging`;
+  const backup = `${versionDirectory}.${process.pid}.backup`;
+  fs.rmSync(staging, { recursive: true, force: true });
+  fs.rmSync(backup, { recursive: true, force: true });
+  fs.mkdirSync(staging, { recursive: true });
+  for (const name of ["plugins", "integrations"]) {
+    const source = path.join(projectRoot, name);
+    if (fs.existsSync(source)) fs.cpSync(source, path.join(staging, name), { recursive: true });
+  }
+  fs.copyFileSync(path.join(projectRoot, "package.json"), path.join(staging, "package.json"));
+  fs.mkdirSync(path.dirname(versionDirectory), { recursive: true });
+  try {
+    if (fs.existsSync(versionDirectory)) fs.renameSync(versionDirectory, backup);
     fs.renameSync(staging, versionDirectory);
+    fs.rmSync(backup, { recursive: true, force: true });
+  } catch (error) {
+    if (!fs.existsSync(versionDirectory) && fs.existsSync(backup)) {
+      fs.renameSync(backup, versionDirectory);
+    }
+    throw error;
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
   }
   fs.mkdirSync(base, { recursive: true });
   switchCurrent(versionDirectory);
@@ -82,7 +93,7 @@ export function installRuntime({ projectRoot, version, dryRun = false } = {}) {
     history,
     installedAt: new Date().toISOString(),
   });
-  return { currentPath: runtimeCurrentPath(), versionDirectory, previousVersion, changed: previousVersion !== version };
+  return { currentPath: runtimeCurrentPath(), versionDirectory, previousVersion, changed: true };
 }
 
 export function rollbackRuntime({ dryRun = false } = {}) {

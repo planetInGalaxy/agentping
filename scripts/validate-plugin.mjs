@@ -22,8 +22,12 @@ function assert(condition, message) {
 }
 
 const manifest = readJson(manifestPath);
+const packageManifest = readJson(path.join(projectRoot, "package.json"));
+const openClawManifest = readJson(path.join(projectRoot, "integrations", "openclaw", "package.json"));
 assert(manifest.name === "agentping", "Unexpected plugin name.");
 assert(/^\d+\.\d+\.\d+/.test(manifest.version), "Plugin version must look semver-like.");
+assert(manifest.version === packageManifest.version, "Codex plugin version must match package.json.");
+assert(openClawManifest.version === packageManifest.version, "OpenClaw integration version must match package.json.");
 assert(manifest.skills === "./skills/", "Manifest skills path should be ./skills/.");
 assert(fs.existsSync(path.join(pluginRoot, "skills")), "Missing plugin skills directory.");
 assert(fs.existsSync(path.join(pluginRoot, "scripts", "pushdeer-notify-event.mjs")), "Missing notify event script.");

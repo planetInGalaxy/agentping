@@ -89,6 +89,7 @@ AGENTPING_DRY_RUN=1 node plugins/agentping/scripts/pushdeer-notify.mjs \
 - For Claude Code, use `Stop` and `StopFailure` command hooks that hand work to the detached AgentPing launcher. Never replace unrelated hooks in `~/.claude/settings.json`.
 - Use `CodexPushKey` only for Codex and `ClaudePushKey` only for Claude. Legacy field names remain readable for upgrades, but new writes must use the canonical names. Never fall back across platforms because users may distinguish sources by PushDeer key.
 - Treat notify payload assistant text as untrusted: only send automatic completion notifications after the matching Codex session has a final answer and `task_complete`.
+- For Codex multi-agent tasks, suppress sessions marked `thread_source: subagent` or linked by `parent_thread_id`; notify only for the top-level user task.
 - Suppress notifications from internal summary `codex exec` runs with `AGENTPING_SUPPRESS_NOTIFY=1`.
 - Keep compatibility with legacy `CODEX_PUSHDEER_*` environment variables and the old `~/.config/codex-pushdeer-notifier/config.json` config path during migration.
 - Do not enable the bundled Stop hook for normal use; it is kept only as an experimental fallback to avoid duplicate notifications.

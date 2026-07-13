@@ -62,6 +62,16 @@ async function main() {
     });
     return;
   }
+  if (sessionFinal.isSubagent) {
+    logEvent("info", "Skipping Codex subagent completion event", {
+      platform: "codex",
+      turnId: sessionFinal.turnId || turnId,
+      sessionId: sessionFinal.sessionId,
+      parentSessionId: sessionFinal.parentSessionId,
+      threadSource: sessionFinal.threadSource,
+    });
+    return;
+  }
 
   const resolvedTurnId = sessionFinal.turnId || turnId;
   const eventIdentity = resolvedTurnId || hashText(JSON.stringify(notification)).slice(0, 24);

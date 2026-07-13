@@ -1238,11 +1238,24 @@ function parseFinalFromSessionFile(filePath, { cwd = "", turnId = "", requireTas
 
   const turns = new Map();
   let activeTurnId = "";
+  let sessionId = "";
+  let parentSessionId = "";
+  let threadSource = "";
+  let isSubagent = false;
 
   for (const line of lines) {
     const item = safeJsonParse(line);
     if (!item || typeof item !== "object") continue;
     const payload = item.payload || {};
+
+    if (item.type === "session_meta") {
+      sessionId = String(payload.id || payload.session_id || "").trim();
+      parentSessionId = String(
+        payload.parent_thread_id || payload.source?.subagent?.thread_spawn?.parent_thread_id || "",
+      ).trim();
+      threadSource = String(payload.thread_source || "").trim().toLowerCase();
+      isSubagent = threadSource === "subagent" || Boolean(parentSessionId) || Boolean(payload.source?.subagent);
+    }
 
     if (item.type === "turn_context" && payload) {
       activeTurnId = payload.turn_id || activeTurnId;
@@ -1331,6 +1344,10 @@ function parseFinalFromSessionFile(filePath, { cwd = "", turnId = "", requireTas
     terminalTimestamp: result.terminalTimestamp,
     durationMs: calculateDurationMs(result.startedTimestamp, result.terminalTimestamp),
     userText: result.userText,
+    sessionId,
+    parentSessionId,
+    threadSource,
+    isSubagent,
   };
 }
 

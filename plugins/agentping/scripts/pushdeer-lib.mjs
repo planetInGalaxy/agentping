@@ -1332,6 +1332,7 @@ function getTurnRecord(turns, turnId) {
       startedTimestamp: "",
       terminalTimestamp: "",
       terminalType: "",
+      terminalReason: "",
       durationMs: null,
       taskComplete: false,
       userText: "",
@@ -1358,6 +1359,7 @@ function parseCodexSessionFile(filePath) {
   let threadSource = "";
   let isSubagent = false;
   let provider = "";
+  let originator = "";
   let previousTotalUsage = null;
 
   for (const line of lines) {
@@ -1373,6 +1375,7 @@ function parseCodexSessionFile(filePath) {
       threadSource = String(payload.thread_source || "").trim().toLowerCase();
       isSubagent = threadSource === "subagent" || Boolean(parentSessionId) || Boolean(payload.source?.subagent);
       provider = String(payload.model_provider || "").trim();
+      originator = String(payload.originator || "").trim().toLowerCase();
     }
 
     if (item.type === "event_msg" && payload.type === "task_started" && payload.turn_id) {
@@ -1462,6 +1465,14 @@ function parseCodexSessionFile(filePath) {
         record.finalTimestamp = item.timestamp || record.finalTimestamp;
       }
     }
+
+    if (item.type === "event_msg" && payload.type === "turn_aborted") {
+      record.terminalType = payload.type;
+      record.terminalReason = String(payload.reason || "").trim().toLowerCase();
+      record.terminalTimestamp = item.timestamp || record.terminalTimestamp;
+      const durationMs = Number(payload.duration_ms);
+      if (Number.isFinite(durationMs) && durationMs >= 0) record.durationMs = durationMs;
+    }
   }
 
   return {
@@ -1471,6 +1482,7 @@ function parseCodexSessionFile(filePath) {
     threadSource,
     isSubagent,
     provider,
+    originator,
     turns: Array.from(turns.values()),
   };
 }
@@ -1502,7 +1514,7 @@ function parseFinalFromSessionFile(filePath, { cwd = "", turnId = "", requireTas
     terminalType: result.terminalType,
     startedTimestamp: result.startedTimestamp,
     terminalTimestamp: result.terminalTimestamp,
-    durationMs: calculateDurationMs(result.startedTimestamp, result.terminalTimestamp),
+    durationMs: result.durationMs ?? calculateDurationMs(result.startedTimestamp, result.terminalTimestamp),
     userText: result.userText,
     sessionId: session.sessionId,
     parentSessionId: session.parentSessionId,
@@ -1510,11 +1522,68 @@ function parseFinalFromSessionFile(filePath, { cwd = "", turnId = "", requireTas
     isSubagent: session.isSubagent,
     model: result.model,
     provider: result.provider || session.provider,
+    originator: session.originator,
+    terminalReason: result.terminalReason,
     usage: normalizeUsage(result.usage, {
       model: result.model,
       provider: result.provider || session.provider,
     }),
   };
+}
+
+function isFinalizedMulticaAbort(session, record, graceMs = 5_000) {
+  if (session.originator !== "multica-agent-sdk") return false;
+  if (session.isSubagent || record.terminalType !== "turn_aborted") return false;
+  if (record.terminalReason && record.terminalReason !== "interrupted") return false;
+  if (!record.finalText || !record.finalTimestamp || !record.terminalTimestamp) return false;
+  const finalAt = Date.parse(record.finalTimestamp);
+  const terminalAt = Date.parse(record.terminalTimestamp);
+  return Number.isFinite(finalAt) && Number.isFinite(terminalAt) &&
+    terminalAt >= finalAt && terminalAt - finalAt <= graceMs;
+}
+
+export function findFinalizedMulticaAborts({
+  sinceMs = 0,
+  graceMs = 5_000,
+  limit = 20,
+} = {}) {
+  const results = [];
+  for (const filePath of newestJsonlFiles(getSessionRoot(), limit)) {
+    const session = parseCodexSessionFile(filePath);
+    if (!session) continue;
+    for (const record of session.turns) {
+      if (!isFinalizedMulticaAbort(session, record, graceMs)) continue;
+      const terminalAtMs = Date.parse(record.terminalTimestamp);
+      if (Number.isFinite(sinceMs) && terminalAtMs < sinceMs) continue;
+      results.push({
+        finalText: record.finalText,
+        turnId: record.turnId,
+        timestamp: record.finalTimestamp,
+        sessionFile: session.filePath,
+        taskComplete: false,
+        terminalType: "task_complete",
+        sourceTerminalType: record.terminalType,
+        startedTimestamp: record.startedTimestamp,
+        terminalTimestamp: record.terminalTimestamp,
+        durationMs: record.durationMs ?? calculateDurationMs(record.startedTimestamp, record.terminalTimestamp),
+        userText: record.userText,
+        sessionId: session.sessionId,
+        parentSessionId: session.parentSessionId,
+        threadSource: session.threadSource,
+        isSubagent: session.isSubagent,
+        model: record.model,
+        provider: record.provider || session.provider,
+        originator: session.originator,
+        cwd: record.cwd,
+        usage: normalizeUsage(record.usage, {
+          model: record.model,
+          provider: record.provider || session.provider,
+        }),
+        terminalAtMs,
+      });
+    }
+  }
+  return results.sort((left, right) => left.terminalAtMs - right.terminalAtMs);
 }
 
 function timestampInRange(value, start, end) {

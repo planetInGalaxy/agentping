@@ -44,6 +44,7 @@ import {
 import { queueStatus } from "../plugins/agentping/scripts/event-queue.mjs";
 import { hermesIntegrationStatus, openClawIntegrationStatus } from "./platform-integrations.mjs";
 import { runtimeCurrentPath, runtimeStatus } from "./runtime-install.mjs";
+import { multicaIntegrationStatus } from "./multica-integration.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), "..");
@@ -234,6 +235,7 @@ const loadedAgents = Object.fromEntries(Object.keys(installedAgents).map((agentI
 ]));
 const runtime = runtimeStatus();
 const queue = queueStatus();
+const multica = multicaIntegrationStatus();
 const checks = {
   node: checkCommand("node"),
   codex: codexCommand.ok
@@ -249,6 +251,10 @@ const checks = {
     detail: runtime.installed
       ? `${runtime.currentVersion} at ${runtime.currentPath}${runtime.previousVersion ? `, rollback ${runtime.previousVersion}` : ""}`
       : "not installed",
+  },
+  multica: {
+    ok: !multica.supported || !checkCommand("multica").ok || (multica.installed && multica.running),
+    detail: multica.detail,
   },
   marketplace: codexCommand.ok ? marketplaceStatus() : { ok: true, detail: "skipped without Codex" },
   plugin: codexCommand.ok ? pluginStatus() : { ok: true, detail: "skipped without Codex" },

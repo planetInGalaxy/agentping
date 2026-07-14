@@ -2,14 +2,15 @@
 
 AgentPing sends concise completion summaries when your AI agents finish.
 
-It supports Codex, Claude Code, OpenClaw, and Hermes completion events with PushDeer delivery. The PushDeer `text` field is a short LLM-generated summary of the full assistant answer. The `desp` field contains the configured answer preview. If the summary model fails, times out, or returns an invalid result, AgentPing uses the configured fixed fallback title.
+It supports Codex, Claude Code, Multica-hosted Codex chats, OpenClaw, and Hermes completion events with PushDeer delivery. The PushDeer `text` field is a short LLM-generated summary of the full assistant answer. The `desp` field contains the configured answer preview. If the summary model fails, times out, or returns an invalid result, AgentPing uses the configured fixed fallback title.
 
 Each platform adapter only converts its native completion hook into AgentPing's versioned completion-event schema. A shared detached worker handles the durable queue, summary, templates, deduplication, logs, and PushDeer delivery. Agent completion is never blocked by summary generation or network delivery.
 
 ## What It Does
 
 - Runs after a Codex, Claude Code, OpenClaw, or Hermes answer is complete.
-- Ignores intermediate commentary/status messages and waits for Codex session `task_complete`.
+- Watches Multica-hosted Codex sessions on macOS, where a delivered final answer is followed by `turn_aborted` instead of Codex's normal completion hook.
+- Ignores intermediate commentary/status messages and waits for Codex session `task_complete`; the Multica watcher uses the narrowly scoped finalized-abort rule described below.
 - In Codex multi-agent tasks, ignores child Agent completions and notifies only when the top-level user task completes.
 - Summarizes the full user question and assistant answer through the configured summary provider: `codex exec`, a safe non-persistent Claude print process, or no LLM summary.
 - Sends the summary in PushDeer `text`.
@@ -63,6 +64,7 @@ The installer will:
 - For Claude Code, merge lightweight `Stop` and `StopFailure` hooks into `~/.claude/settings.json` without replacing unrelated hooks. The hook launches the notification worker in a detached process so interactive sessions and one-shot `claude -p` commands behave consistently.
 - For OpenClaw, install its native plugin and enable the conversation access required by `agent_end`.
 - For Hermes, install a native `post_llm_call` plugin under `~/.hermes/plugins/agentping`.
+- When Multica is installed on macOS, install a LaunchAgent that watches only `multica-agent-sdk` sessions and queues a notification after a complete final answer is immediately finalized as `turn_aborted`.
 - Prompt separately for missing PushDeer keys for each installed Agent.
 - Store all keys only in `~/.config/agentping/config.json` with mode `0600`.
 - Copy runtime files into a versioned stable directory so hooks do not depend on the cloned repository remaining in place.
@@ -114,12 +116,23 @@ node scripts/install.mjs --skip-codex
 node scripts/install.mjs --skip-claude
 node scripts/install.mjs --skip-openclaw
 node scripts/install.mjs --skip-hermes
+node scripts/install.mjs --skip-multica
 node scripts/install.mjs --force-notify
 node scripts/install.mjs --install-legacy-shim
 node scripts/install.mjs --skip-legacy-shim
 ```
 
 Installed agents use the shared runtime on their next completed turn. Claude Code normally reloads settings without a restart. A process that cached its plugin registry before installation may still need to be restarted once; later AgentPing runtime updates do not require rewriting hook paths.
+
+Manage the macOS Multica watcher directly with:
+
+```bash
+agentping multica status
+agentping multica install
+agentping multica uninstall
+```
+
+The watcher does not treat arbitrary aborted Codex turns as success. It only accepts top-level `multica-agent-sdk` sessions when a complete final answer is followed by `turn_aborted` within five seconds, and it reuses the normal durable queue and turn-ID deduplication.
 
 ## Package-Style Usage
 

@@ -15,6 +15,7 @@ import {
   removeOpenClawIntegration,
 } from "./platform-integrations.mjs";
 import { runtimeCurrentPath } from "./runtime-install.mjs";
+import { uninstallMulticaIntegration } from "./multica-integration.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), "..");
@@ -137,6 +138,10 @@ if (!args["keep-openclaw"]) {
 if (!args["keep-hermes"]) {
   const result = removeHermesIntegration({ dryRun: Boolean(args["dry-run"]) });
   console.log(`${result.changed ? "Removed" : "Skipped"} Hermes integration: ${result.detail}`);
+}
+if (!args["keep-multica"]) {
+  const result = uninstallMulticaIntegration({ dryRun: Boolean(args["dry-run"]) });
+  console.log(`${result.removed ? "Removed" : "Skipped"} Multica integration: ${result.detail}`);
 }
 
 if (args["forget-key"]) {

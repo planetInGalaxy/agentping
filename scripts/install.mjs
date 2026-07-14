@@ -56,6 +56,7 @@ import {
   installHermesIntegration,
   installOpenClawIntegration,
 } from "./platform-integrations.mjs";
+import { installMulticaIntegration } from "./multica-integration.mjs";
 import { installRuntime, runtimeCurrentPath } from "./runtime-install.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -257,6 +258,15 @@ function installExternalAgentIntegrations() {
     const result = installHermesIntegration({ runtimeRoot, dryRun: Boolean(args["dry-run"]) });
     console.log(`${result.installed ? "Configured" : "Skipped"} Hermes integration: ${result.detail}`);
   }
+}
+
+function configureMulticaIntegration() {
+  if (args["skip-multica"] || !commandAvailable("multica")) {
+    console.log("Skipped Multica integration; Multica is unavailable or disabled.");
+    return;
+  }
+  const result = installMulticaIntegration({ dryRun: Boolean(args["dry-run"]) });
+  console.log(`${result.installed ? "Configured" : "Skipped"} Multica integration: ${result.detail}`);
 }
 
 function managedShimSource({ computerUseCommand = "" } = {}) {
@@ -833,6 +843,7 @@ installPlugin();
 await configureNotify();
 configureClaudeHooks();
 installExternalAgentIntegrations();
+configureMulticaIntegration();
 configureLegacyNotifyShim();
 migrateLegacyConfig();
 configureSummaryModel();

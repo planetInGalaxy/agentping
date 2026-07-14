@@ -1,6 +1,6 @@
 {
   "name": "agentping",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Notify when your AI agents finish and send concise completion summaries.",
   "private": false,
   "keywords": [
@@ -45,6 +45,7 @@
     "doctor": "node scripts/doctor.mjs",
     "config": "node scripts/config.mjs",
     "logs": "node scripts/logs.mjs",
+    "multica": "node scripts/multica-integration.mjs",
     "test:notifier": "node scripts/test-notifier.mjs",
     "check-models": "node scripts/check-models.mjs",
     "plugin:validate": "node scripts/validate-plugin.mjs",

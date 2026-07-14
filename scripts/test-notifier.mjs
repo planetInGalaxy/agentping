@@ -25,6 +25,7 @@ import {
   codexTransportDiagnostics,
   configWithChineseComments,
   fallbackDescription,
+  findFinalizedMulticaAborts,
   formatFinalTextPreview,
   formatNotificationFields,
   formatDesp,
@@ -79,6 +80,7 @@ const eventScript = path.join(pluginRoot, "scripts", "pushdeer-notify-event.mjs"
 const claudeEventScript = path.join(pluginRoot, "scripts", "claude-notify-event.mjs");
 const claudeLauncherScript = path.join(pluginRoot, "scripts", "claude-notify-launcher.mjs");
 const notifyScript = path.join(pluginRoot, "scripts", "pushdeer-notify.mjs");
+const multicaWatcherScript = path.join(pluginRoot, "scripts", "multica-session-watcher.mjs");
 const command = process.argv[2] || "all";
 const flags = new Set(process.argv.slice(3));
 
@@ -152,6 +154,10 @@ function writeSession(workspace, {
   completedAt = "2026-07-08T09:02:00.000Z",
   userText = "请总结这个回答",
   finalText = "已经完成本地通知自测，确认只在完整最终回答后触发，并且摘要来自完整输出。",
+  originator = "",
+  terminalType = "task_complete",
+  terminalReason = "interrupted",
+  finalAt = completedAt,
 } = {}) {
   const filePath = path.join(workspace.sessionDir, `${turnId}.jsonl`);
   const lines = [
@@ -164,6 +170,7 @@ function writeSession(workspace, {
         ...(parentThreadId ? { parent_thread_id: parentThreadId } : {}),
         thread_source: threadSource,
         model_provider: provider,
+        ...(originator ? { originator } : {}),
         ...(threadSource === "subagent" ? {
           source: {
             subagent: {
@@ -241,7 +248,7 @@ function writeSession(workspace, {
   if (includeFinal) {
     lines.push(
       {
-        timestamp: completedAt,
+        timestamp: finalAt,
         type: "response_item",
         payload: {
           type: "message",
@@ -259,9 +266,10 @@ function writeSession(workspace, {
         timestamp: completedAt,
         type: "event_msg",
         payload: {
-          type: "task_complete",
+          type: terminalType,
           turn_id: turnId,
-          message: finalText,
+          ...(terminalType === "task_complete" ? { message: finalText } : {}),
+          ...(terminalType === "turn_aborted" ? { reason: terminalReason } : {}),
         },
       },
     );
@@ -269,6 +277,65 @@ function writeSession(workspace, {
 
   fs.writeFileSync(filePath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
   return filePath;
+}
+
+function testMulticaFinalizedAbortDetection() {
+  const workspace = makeTempWorkspace();
+  const previousCodexHome = process.env.CODEX_HOME;
+  try {
+    process.env.CODEX_HOME = workspace.codexHome;
+    writeSession(workspace, {
+      turnId: "turn-multica-finalized",
+      originator: "multica-agent-sdk",
+      terminalType: "turn_aborted",
+      finalAt: "2026-07-08T09:01:59.900Z",
+      completedAt: "2026-07-08T09:02:00.000Z",
+    });
+    writeSession(workspace, {
+      turnId: "turn-other-aborted",
+      originator: "another-client",
+      terminalType: "turn_aborted",
+    });
+    writeSession(workspace, {
+      turnId: "turn-multica-stale-final",
+      originator: "multica-agent-sdk",
+      terminalType: "turn_aborted",
+      finalAt: "2026-07-08T09:01:40.000Z",
+      completedAt: "2026-07-08T09:02:00.000Z",
+    });
+    const results = findFinalizedMulticaAborts({ sinceMs: 0 });
+    assert.deepEqual(results.map((item) => item.turnId), ["turn-multica-finalized"]);
+    assert.equal(results[0].terminalType, "task_complete");
+    assert.equal(results[0].sourceTerminalType, "turn_aborted");
+    assert.equal(results[0].originator, "multica-agent-sdk");
+
+    const watcher = spawnSync(process.execPath, [multicaWatcherScript], {
+      cwd: workspace.cwd,
+      stdio: "pipe",
+      encoding: "utf8",
+      timeout: 10_000,
+      env: {
+        ...process.env,
+        CODEX_HOME: workspace.codexHome,
+        AGENTPING_STATE_DIR: workspace.stateDir,
+        AGENTPING_CONFIG: workspace.configPath,
+        AGENTPING_DRY_RUN: "1",
+        AGENTPING_DISABLE_LLM_SUMMARY: "1",
+        AGENTPING_QUEUE_SYNC: "1",
+        AGENTPING_MULTICA_WATCH_ONCE: "1",
+        AGENTPING_MULTICA_SINCE_MS: "0",
+      },
+    });
+    assert.equal(watcher.status, 0, watcher.stderr || watcher.stdout);
+    const log = readLog(workspace);
+    assert.match(log, /Multica finalized turn queued/u);
+    assert.match(log, /PushDeer notify event sent/u);
+    assert.match(log, /"sourceTerminalType":"turn_aborted"/u);
+  } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    cleanupTempWorkspace(workspace);
+  }
 }
 
 function runEvent(workspace, notification, extraEnv = {}) {
@@ -1489,6 +1556,7 @@ const tests = {
   final: () => test("final-only notification", testFinalOnlyNotification),
   subagent: () => test("Codex subagent completion is suppressed", testSubagentNotificationSuppressed),
   codex_usage: () => test("Codex usage includes subagents", testCodexUsageIncludesSubagents),
+  multica: () => test("Multica finalized abort detection", testMulticaFinalizedAbortDetection),
   summary: () => test("LLM summary is used whole", testLlmSummaryIsUsedWhole),
   summary_fallback: () => test("invalid LLM summary uses fixed fallback", testInvalidLlmSummaryUsesFixedFallback),
   logs: () => test("log rotation", testLogRotation),
@@ -1514,6 +1582,7 @@ if (command === "all") {
   await tests.final();
   await tests.subagent();
   await tests.codex_usage();
+  await tests.multica();
   await tests.summary();
   await tests.summary_fallback();
   await tests.logs();
@@ -1533,7 +1602,7 @@ if (command === "all") {
 } else if (tests[command]) {
   await tests[command]();
 } else {
-  console.error("Usage: agentping test [all|format|config_migration|final|subagent|codex_usage|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
+  console.error("Usage: agentping test [all|format|config_migration|final|subagent|codex_usage|multica|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
   process.exit(2);
 }
 

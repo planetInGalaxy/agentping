@@ -1,6 +1,6 @@
 {
   "name": "agentping",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Notify when AI agents finish and send concise completion summaries.",
   "author": {
     "name": "AgentPing Notifier contributors"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "AgentPing",
     "shortDescription": "Ping you when AI agents finish.",
-    "longDescription": "AgentPing sends concise PushDeer summaries when Codex, Claude Code, OpenClaw, or Hermes finishes without changing the original response.",
+    "longDescription": "AgentPing sends concise PushDeer summaries when Codex, Multica-hosted Codex, Claude Code, OpenClaw, or Hermes finishes without changing the original response.",
     "developerName": "AgentPing Notifier contributors",
     "category": "Productivity",
     "capabilities": [

@@ -158,6 +158,8 @@ function writeSession(workspace, {
   terminalType = "task_complete",
   terminalReason = "interrupted",
   finalAt = completedAt,
+  continuationTurnId = "",
+  continuationUserText = "",
 } = {}) {
   const filePath = path.join(workspace.sessionDir, `${turnId}.jsonl`);
   const lines = [
@@ -275,6 +277,33 @@ function writeSession(workspace, {
     );
   }
 
+  if (continuationTurnId) {
+    lines.push(
+      {
+        timestamp: "2026-07-08T09:02:00.001Z",
+        type: "event_msg",
+        payload: {
+          type: "task_started",
+          turn_id: continuationTurnId,
+        },
+      },
+      {
+        timestamp: "2026-07-08T09:02:00.500Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          turn_id: continuationTurnId,
+          content: [
+            {
+              text: continuationUserText,
+            },
+          ],
+        },
+      },
+    );
+  }
+
   fs.writeFileSync(filePath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
   return filePath;
 }
@@ -354,6 +383,7 @@ function runEvent(workspace, notification, extraEnv = {}) {
         AGENTPING_CONFIG: workspace.configPath,
         AGENTPING_DRY_RUN: "1",
         AGENTPING_FINAL_WAIT_MS: "0",
+        AGENTPING_GOAL_CONTINUATION_WAIT_MS: "0",
         AGENTPING_QUEUE_SYNC: "1",
         ...extraEnv,
       },
@@ -778,6 +808,53 @@ function testSubagentNotificationSuppressed() {
     assert.doesNotMatch(log, /PushDeer notify event sent/u);
   } finally {
     cleanupTempWorkspace(workspace);
+  }
+}
+
+function testGoalContinuationNotificationSuppressed() {
+  const goalWorkspace = makeTempWorkspace();
+  const followupWorkspace = makeTempWorkspace();
+  try {
+    const turnId = "turn-goal-stage";
+    writeSession(goalWorkspace, {
+      turnId,
+      continuationTurnId: "turn-goal-continuation",
+      continuationUserText: '<codex_internal_context source="goal">Continue working toward the active thread goal.</codex_internal_context>',
+    });
+    runEvent(goalWorkspace, {
+      type: "agent-turn-complete",
+      "turn-id": turnId,
+      "input-messages": [{ text: "目标阶段完成事件" }],
+    }, {
+      AGENTPING_DISABLE_LLM_SUMMARY: "1",
+    });
+
+    const goalLog = readLog(goalWorkspace);
+    assert.match(goalLog, /Skipping intermediate Codex goal completion event/u);
+    assert.match(goalLog, /"continuationTurnId":"turn-goal-continuation"/u);
+    assert.doesNotMatch(goalLog, /AgentPing completion event queued/u);
+    assert.doesNotMatch(goalLog, /PushDeer notify event sent/u);
+
+    const followupTurnId = "turn-before-user-followup";
+    writeSession(followupWorkspace, {
+      turnId: followupTurnId,
+      continuationTurnId: "turn-user-followup",
+      continuationUserText: "用户手动发起的下一项普通任务",
+    });
+    runEvent(followupWorkspace, {
+      type: "agent-turn-complete",
+      "turn-id": followupTurnId,
+      "input-messages": [{ text: "普通任务完成事件" }],
+    }, {
+      AGENTPING_DISABLE_LLM_SUMMARY: "1",
+    });
+
+    const followupLog = readLog(followupWorkspace);
+    assert.doesNotMatch(followupLog, /Skipping intermediate Codex goal completion event/u);
+    assert.match(followupLog, /PushDeer notify event sent/u);
+  } finally {
+    cleanupTempWorkspace(goalWorkspace);
+    cleanupTempWorkspace(followupWorkspace);
   }
 }
 
@@ -1555,6 +1632,7 @@ const tests = {
   config_migration: () => test("config field migration", testConfigFieldMigration),
   final: () => test("final-only notification", testFinalOnlyNotification),
   subagent: () => test("Codex subagent completion is suppressed", testSubagentNotificationSuppressed),
+  codex_goal: () => test("Codex goal continuation is suppressed", testGoalContinuationNotificationSuppressed),
   codex_usage: () => test("Codex usage includes subagents", testCodexUsageIncludesSubagents),
   multica: () => test("Multica finalized abort detection", testMulticaFinalizedAbortDetection),
   summary: () => test("LLM summary is used whole", testLlmSummaryIsUsedWhole),
@@ -1581,6 +1659,7 @@ if (command === "all") {
   await tests.config_migration();
   await tests.final();
   await tests.subagent();
+  await tests.codex_goal();
   await tests.codex_usage();
   await tests.multica();
   await tests.summary();
@@ -1602,7 +1681,7 @@ if (command === "all") {
 } else if (tests[command]) {
   await tests[command]();
 } else {
-  console.error("Usage: agentping test [all|format|config_migration|final|subagent|codex_usage|multica|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
+  console.error("Usage: agentping test [all|format|config_migration|final|subagent|codex_goal|codex_usage|multica|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
   process.exit(2);
 }
 

@@ -1717,6 +1717,85 @@ export async function findLatestFinalMessage({
   return null;
 }
 
+function sessionTailLines(filePath, maxBytes = 2 * 1024 * 1024) {
+  let handle;
+  try {
+    handle = fs.openSync(filePath, "r");
+    const fileSize = fs.fstatSync(handle).size;
+    const size = Math.min(fileSize, maxBytes);
+    const start = fileSize - size;
+    const buffer = Buffer.alloc(size);
+    fs.readSync(handle, buffer, 0, size, start);
+    const text = buffer.toString("utf8");
+    const completeText = start > 0 ? text.slice(text.indexOf("\n") + 1) : text;
+    return completeText.split(/\n+/).filter(Boolean);
+  } catch {
+    return [];
+  } finally {
+    if (handle !== undefined) {
+      try {
+        fs.closeSync(handle);
+      } catch {
+        // Ignore a close race on a session file that changed while being read.
+      }
+    }
+  }
+}
+
+function goalContinuationFromSessionTail(sessionFile, turnId, terminalTimestamp = "") {
+  let terminalAt = Date.parse(terminalTimestamp);
+  let activeTurnId = "";
+  for (const line of sessionTailLines(sessionFile)) {
+    const item = safeJsonParse(line);
+    if (!item || typeof item !== "object") continue;
+    const payload = item.payload || {};
+    const itemTurnId = extractTurnId(payload) || activeTurnId;
+
+    if (item.type === "event_msg" && payload.type === "task_started") {
+      activeTurnId = itemTurnId;
+    }
+    if (item.type === "event_msg" && payload.type === "task_complete" && itemTurnId === turnId) {
+      terminalAt = Date.parse(item.timestamp || "");
+    }
+
+    const isUserMessage =
+      (item.type === "response_item" && payload.type === "message" && payload.role === "user") ||
+      (item.type === "event_msg" && payload.type === "user_message");
+    if (!isUserMessage || !itemTurnId || itemTurnId === turnId) continue;
+    const text = payloadMessageText(payload);
+    if (!/<codex_internal_context\b[^>]*\bsource=["']goal["'][^>]*>/iu.test(text)) continue;
+    const continuationAt = Date.parse(item.timestamp || "");
+    const gapMs = continuationAt - terminalAt;
+    if (!Number.isFinite(gapMs) || gapMs < 0 || gapMs > 10_000) continue;
+    return {
+      turnId: itemTurnId,
+      startedTimestamp: item.timestamp || "",
+    };
+  }
+  return null;
+}
+
+export async function findCodexGoalContinuation({
+  sessionFile,
+  turnId,
+  terminalTimestamp = "",
+  timeoutMs = 3_000,
+  intervalMs = 500,
+} = {}) {
+  if (!sessionFile || !turnId) return null;
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  let attempt = 0;
+
+  while (Date.now() <= deadline || attempt === 0) {
+    const continuation = goalContinuationFromSessionTail(sessionFile, turnId, terminalTimestamp);
+    if (continuation) return continuation;
+    attempt += 1;
+    if (Date.now() > deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return null;
+}
+
 export function wasAlreadySent(id) {
   if (!id) return false;
   const state = readJsonIfExists(statePath("sent.json"), { sent: [] });

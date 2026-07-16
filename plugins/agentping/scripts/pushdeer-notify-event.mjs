@@ -2,6 +2,7 @@
 import {
   envValue,
   extractTurnId,
+  findCodexGoalContinuation,
   findLatestFinalMessage,
   hashText,
   loadConfig,
@@ -69,6 +70,26 @@ async function main() {
       sessionId: sessionFinal.sessionId,
       parentSessionId: sessionFinal.parentSessionId,
       threadSource: sessionFinal.threadSource,
+    });
+    return;
+  }
+
+  const configuredGoalWaitMs = Number.parseInt(envValue("AGENTPING_GOAL_CONTINUATION_WAIT_MS"), 10);
+  const goalWaitMs = Number.isFinite(configuredGoalWaitMs)
+    ? Math.max(0, Math.min(configuredGoalWaitMs, 10_000))
+    : 3_000;
+  const goalContinuation = await findCodexGoalContinuation({
+    sessionFile: sessionFinal.sessionFile,
+    turnId: sessionFinal.turnId || turnId,
+    terminalTimestamp: sessionFinal.terminalTimestamp,
+    timeoutMs: goalWaitMs,
+  });
+  if (goalContinuation) {
+    logEvent("info", "Skipping intermediate Codex goal completion event", {
+      platform: "codex",
+      turnId: sessionFinal.turnId || turnId,
+      continuationTurnId: goalContinuation.turnId,
+      sessionId: sessionFinal.sessionId,
     });
     return;
   }

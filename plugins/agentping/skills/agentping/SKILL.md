@@ -107,6 +107,7 @@ AGENTPING_DRY_RUN=1 node plugins/agentping/scripts/pushdeer-notify.mjs \
 - Treat notify payload assistant text as untrusted: only send automatic completion notifications after the matching Codex session has a final answer and `task_complete`. The macOS Multica watcher is the narrow exception: it accepts only top-level sessions with `originator: multica-agent-sdk` whose complete final answer is followed within five seconds by Multica's `turn_aborted` finalization, then normalizes that event to `task_complete`.
 - When Multica is installed on macOS, use `agentping multica install|status|uninstall` to manage the persistent session watcher. Do not enable aborted-turn watching for other Codex originators.
 - For Codex multi-agent tasks, suppress sessions marked `thread_source: subagent` or linked by `parent_thread_id`; notify only for the top-level user task.
+- For Codex persistent goals, suppress a completed turn when the same session immediately starts a new turn whose internal context has `source="goal"`; notify only after automatic goal continuation stops.
 - Include descendant Codex token usage in the top-level task total. Do not count the separate summary subprocess as task usage.
 - Suppress notifications from internal summary `codex exec` runs with `AGENTPING_SUPPRESS_NOTIFY=1`.
 - Keep compatibility with legacy `CODEX_PUSHDEER_*` environment variables and the old `~/.config/codex-pushdeer-notifier/config.json` config path during migration.

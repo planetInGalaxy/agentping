@@ -146,6 +146,8 @@ function writeSession(workspace, {
   sessionId = `session-${turnId}`,
   parentThreadId = "",
   threadSource = "user",
+  sessionSource = "",
+  sessionUserTextPrefix = "",
   model = "",
   provider = "openai",
   usageSequence = [],
@@ -173,6 +175,7 @@ function writeSession(workspace, {
         thread_source: threadSource,
         model_provider: provider,
         ...(originator ? { originator } : {}),
+        ...(sessionSource ? { source: sessionSource } : {}),
         ...(threadSource === "subagent" ? {
           source: {
             subagent: {
@@ -185,6 +188,16 @@ function writeSession(workspace, {
         } : {}),
       },
     },
+    ...(sessionUserTextPrefix ? [{
+      timestamp: startedAt,
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        turn_id: "session-preamble-turn",
+        content: [{ text: sessionUserTextPrefix }],
+      },
+    }] : []),
     {
       timestamp: startedAt,
       type: "turn_context",
@@ -808,6 +821,56 @@ function testSubagentNotificationSuppressed() {
     assert.doesNotMatch(log, /PushDeer notify event sent/u);
   } finally {
     cleanupTempWorkspace(workspace);
+  }
+}
+
+function testDeclaredIntermediateExecSubtaskSuppressed() {
+  const subtaskWorkspace = makeTempWorkspace();
+  const standaloneWorkspace = makeTempWorkspace();
+  try {
+    const turnId = "turn-resumed-isolated-subtask";
+    writeSession(subtaskWorkspace, {
+      turnId,
+      sessionSource: "exec",
+      sessionUserTextPrefix: "This is an isolated candidate-writing subtask, not final delivery.",
+      userText: "Continue the assigned candidate-writing task now and finish.",
+      finalText: "The isolated candidate draft is complete, while the parent task is still running.",
+    });
+    runEvent(subtaskWorkspace, {
+      type: "agent-turn-complete",
+      "turn-id": turnId,
+      "input-messages": [{ text: "Continue the assigned candidate-writing task now and finish." }],
+    }, {
+      AGENTPING_DISABLE_LLM_SUMMARY: "1",
+    });
+
+    const subtaskLog = readLog(subtaskWorkspace);
+    assert.match(subtaskLog, /Skipping declared Codex intermediate subtask completion event/u);
+    assert.match(subtaskLog, /"sessionSource":"exec"/u);
+    assert.doesNotMatch(subtaskLog, /AgentPing completion event queued/u);
+    assert.doesNotMatch(subtaskLog, /PushDeer notify event sent/u);
+
+    const standaloneTurnId = "turn-standalone-exec";
+    writeSession(standaloneWorkspace, {
+      turnId: standaloneTurnId,
+      sessionSource: "exec",
+      userText: "独立完成这项正式任务并返回最终结果",
+      finalText: "正式的 codex exec 任务已经完整完成。",
+    });
+    runEvent(standaloneWorkspace, {
+      type: "agent-turn-complete",
+      "turn-id": standaloneTurnId,
+      "input-messages": [{ text: "独立完成这项正式任务并返回最终结果" }],
+    }, {
+      AGENTPING_DISABLE_LLM_SUMMARY: "1",
+    });
+
+    const standaloneLog = readLog(standaloneWorkspace);
+    assert.doesNotMatch(standaloneLog, /Skipping declared Codex intermediate subtask completion event/u);
+    assert.match(standaloneLog, /PushDeer notify event sent/u);
+  } finally {
+    cleanupTempWorkspace(subtaskWorkspace);
+    cleanupTempWorkspace(standaloneWorkspace);
   }
 }
 
@@ -1632,6 +1695,7 @@ const tests = {
   config_migration: () => test("config field migration", testConfigFieldMigration),
   final: () => test("final-only notification", testFinalOnlyNotification),
   subagent: () => test("Codex subagent completion is suppressed", testSubagentNotificationSuppressed),
+  codex_exec_subtask: () => test("declared Codex exec subtask is suppressed", testDeclaredIntermediateExecSubtaskSuppressed),
   codex_goal: () => test("Codex goal continuation is suppressed", testGoalContinuationNotificationSuppressed),
   codex_usage: () => test("Codex usage includes subagents", testCodexUsageIncludesSubagents),
   multica: () => test("Multica finalized abort detection", testMulticaFinalizedAbortDetection),
@@ -1659,6 +1723,7 @@ if (command === "all") {
   await tests.config_migration();
   await tests.final();
   await tests.subagent();
+  await tests.codex_exec_subtask();
   await tests.codex_goal();
   await tests.codex_usage();
   await tests.multica();
@@ -1681,7 +1746,7 @@ if (command === "all") {
 } else if (tests[command]) {
   await tests[command]();
 } else {
-  console.error("Usage: agentping test [all|format|config_migration|final|subagent|codex_goal|codex_usage|multica|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
+  console.error("Usage: agentping test [all|format|config_migration|final|subagent|codex_exec_subtask|codex_goal|codex_usage|multica|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
   process.exit(2);
 }
 

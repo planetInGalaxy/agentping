@@ -1357,6 +1357,9 @@ function parseCodexSessionFile(filePath) {
   let sessionId = "";
   let parentSessionId = "";
   let threadSource = "";
+  let sessionSource = "";
+  let sessionDeclaresSubtask = false;
+  let sessionRejectsFinalDelivery = false;
   let isSubagent = false;
   let provider = "";
   let originator = "";
@@ -1373,6 +1376,9 @@ function parseCodexSessionFile(filePath) {
         payload.parent_thread_id || payload.source?.subagent?.thread_spawn?.parent_thread_id || "",
       ).trim();
       threadSource = String(payload.thread_source || "").trim().toLowerCase();
+      sessionSource = typeof payload.source === "string"
+        ? payload.source.trim().toLowerCase()
+        : payload.source?.subagent ? "subagent" : "";
       isSubagent = threadSource === "subagent" || Boolean(parentSessionId) || Boolean(payload.source?.subagent);
       provider = String(payload.model_provider || "").trim();
       originator = String(payload.originator || "").trim().toLowerCase();
@@ -1421,7 +1427,11 @@ function parseCodexSessionFile(filePath) {
 
     if (item.type === "response_item" && payload.type === "message" && payload.role === "user") {
       const text = payloadMessageText(payload);
-      if (text.trim()) record.userText = `${record.userText}\n${text}`.trim();
+      if (text.trim()) {
+        record.userText = `${record.userText}\n${text}`.trim();
+        sessionDeclaresSubtask ||= declaresIntermediateSubtask(text);
+        sessionRejectsFinalDelivery ||= rejectsFinalDelivery(text);
+      }
     }
 
     if (item.type === "response_item" && payload.type === "message" && payload.role === "assistant" && isFinalPhase(payload.phase)) {
@@ -1442,7 +1452,11 @@ function parseCodexSessionFile(filePath) {
 
     if (item.type === "event_msg" && payload.type === "user_message") {
       const text = payloadMessageText(payload);
-      if (text.trim()) record.userText = `${record.userText}\n${text}`.trim();
+      if (text.trim()) {
+        record.userText = `${record.userText}\n${text}`.trim();
+        sessionDeclaresSubtask ||= declaresIntermediateSubtask(text);
+        sessionRejectsFinalDelivery ||= rejectsFinalDelivery(text);
+      }
     }
 
     if (item.type === "event_msg" && payload.type === "task_complete") {
@@ -1480,6 +1494,9 @@ function parseCodexSessionFile(filePath) {
     sessionId,
     parentSessionId,
     threadSource,
+    sessionSource,
+    declaredIntermediateSubtask:
+      sessionSource === "exec" && sessionDeclaresSubtask && sessionRejectsFinalDelivery,
     isSubagent,
     provider,
     originator,
@@ -1519,6 +1536,8 @@ function parseFinalFromSessionFile(filePath, { cwd = "", turnId = "", requireTas
     sessionId: session.sessionId,
     parentSessionId: session.parentSessionId,
     threadSource: session.threadSource,
+    sessionSource: session.sessionSource,
+    declaredIntermediateSubtask: session.declaredIntermediateSubtask,
     isSubagent: session.isSubagent,
     model: result.model,
     provider: result.provider || session.provider,
@@ -1529,6 +1548,28 @@ function parseFinalFromSessionFile(filePath, { cwd = "", turnId = "", requireTas
       provider: result.provider || session.provider,
     }),
   };
+}
+
+function declaresIntermediateSubtask(text) {
+  return /\b(?:isolated|intermediate|internal)\b[^\n]{0,120}\bsubtask\b/iu.test(text) ||
+    /(?:隔离|独立|中间|内部)(?:的)?子任务/u.test(text);
+}
+
+function rejectsFinalDelivery(text) {
+  return /\bnot\s+(?:a\s+)?final\s+(?:delivery|answer|response|result)\b/iu.test(text) ||
+    /(?:不是|并非|非|不作为|不属于)(?:这次|本次|当前)?(?:的)?最终(?:交付|回答|答复|结果)/u.test(text);
+}
+
+export function isDeclaredIntermediateCodexSubtask(input = {}) {
+  const {
+    declaredIntermediateSubtask = false,
+    sessionSource = "",
+    sessionUserText = "",
+  } = input || {};
+  if (declaredIntermediateSubtask) return true;
+  if (String(sessionSource).trim().toLowerCase() !== "exec") return false;
+  const text = String(sessionUserText || "");
+  return declaresIntermediateSubtask(text) && rejectsFinalDelivery(text);
 }
 
 function isFinalizedMulticaAbort(session, record, graceMs = 5_000) {

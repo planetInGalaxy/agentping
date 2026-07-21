@@ -12,6 +12,7 @@ Each platform adapter only converts its native completion hook into AgentPing's 
 - Watches Multica-hosted Codex sessions on macOS, where a delivered final answer is followed by `turn_aborted` instead of Codex's normal completion hook.
 - Ignores intermediate commentary/status messages and waits for Codex session `task_complete`; the Multica watcher uses the narrowly scoped finalized-abort rule described below.
 - In Codex multi-agent tasks, ignores child Agent completions and notifies only when the top-level user task completes.
+- Ignores isolated `codex exec` work that explicitly declares itself an intermediate subtask rather than final delivery, including resumed subtask turns.
 - In Codex persistent-goal tasks, ignores automatically continued intermediate turns and notifies only after Codex stops scheduling another goal continuation.
 - Summarizes the full user question and assistant answer through the configured summary provider: `codex exec`, a safe non-persistent Claude print process, or no LLM summary.
 - Sends the summary in PushDeer `text`.

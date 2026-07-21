@@ -5,6 +5,7 @@ import {
   findCodexGoalContinuation,
   findLatestFinalMessage,
   hashText,
+  isDeclaredIntermediateCodexSubtask,
   loadConfig,
   logEvent,
   safeJsonParse,
@@ -70,6 +71,15 @@ async function main() {
       sessionId: sessionFinal.sessionId,
       parentSessionId: sessionFinal.parentSessionId,
       threadSource: sessionFinal.threadSource,
+    });
+    return;
+  }
+  if (isDeclaredIntermediateCodexSubtask(sessionFinal)) {
+    logEvent("info", "Skipping declared Codex intermediate subtask completion event", {
+      platform: "codex",
+      turnId: sessionFinal.turnId || turnId,
+      sessionId: sessionFinal.sessionId,
+      sessionSource: sessionFinal.sessionSource,
     });
     return;
   }

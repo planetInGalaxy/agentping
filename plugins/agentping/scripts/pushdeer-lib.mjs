@@ -1363,6 +1363,7 @@ function parseCodexSessionFile(filePath) {
   let isSubagent = false;
   let provider = "";
   let originator = "";
+  let sessionIdentityResolved = false;
   let previousTotalUsage = null;
 
   for (const line of lines) {
@@ -1371,17 +1372,23 @@ function parseCodexSessionFile(filePath) {
     const payload = item.payload || {};
 
     if (item.type === "session_meta") {
-      sessionId = String(payload.id || payload.session_id || "").trim();
-      parentSessionId = String(
-        payload.parent_thread_id || payload.source?.subagent?.thread_spawn?.parent_thread_id || "",
-      ).trim();
-      threadSource = String(payload.thread_source || "").trim().toLowerCase();
-      sessionSource = typeof payload.source === "string"
-        ? payload.source.trim().toLowerCase()
-        : payload.source?.subagent ? "subagent" : "";
-      isSubagent = threadSource === "subagent" || Boolean(parentSessionId) || Boolean(payload.source?.subagent);
-      provider = String(payload.model_provider || "").trim();
-      originator = String(payload.originator || "").trim().toLowerCase();
+      if (!sessionIdentityResolved) {
+        sessionId = String(payload.id || payload.session_id || "").trim();
+        parentSessionId = String(
+          payload.parent_thread_id || payload.source?.subagent?.thread_spawn?.parent_thread_id || "",
+        ).trim();
+        threadSource = String(payload.thread_source || "").trim().toLowerCase();
+        sessionSource = typeof payload.source === "string"
+          ? payload.source.trim().toLowerCase()
+          : payload.source?.subagent ? "subagent" : "";
+        isSubagent = threadSource === "subagent" || Boolean(parentSessionId) || Boolean(payload.source?.subagent);
+        provider = String(payload.model_provider || "").trim();
+        originator = String(payload.originator || "").trim().toLowerCase();
+        sessionIdentityResolved = true;
+      } else {
+        provider ||= String(payload.model_provider || "").trim();
+        originator ||= String(payload.originator || "").trim().toLowerCase();
+      }
     }
 
     if (item.type === "event_msg" && payload.type === "task_started" && payload.turn_id) {

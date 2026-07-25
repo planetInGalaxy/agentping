@@ -146,6 +146,7 @@ function writeSession(workspace, {
   sessionId = `session-${turnId}`,
   parentThreadId = "",
   threadSource = "user",
+  appendParentSessionMeta = false,
   sessionSource = "",
   sessionUserTextPrefix = "",
   model = "",
@@ -188,6 +189,18 @@ function writeSession(workspace, {
         } : {}),
       },
     },
+    ...(appendParentSessionMeta ? [{
+      timestamp: startedAt,
+      type: "session_meta",
+      payload: {
+        id: parentThreadId,
+        session_id: parentThreadId,
+        thread_source: "user",
+        source: "vscode",
+        model_provider: provider,
+        originator: "Codex Desktop",
+      },
+    }] : []),
     ...(sessionUserTextPrefix ? [{
       timestamp: startedAt,
       type: "response_item",
@@ -816,6 +829,38 @@ function testSubagentNotificationSuppressed() {
 
     const log = readLog(workspace);
     assert.match(log, /Skipping Codex subagent completion event/u);
+    assert.match(log, /"parentSessionId":"top-level-user-session"/u);
+    assert.doesNotMatch(log, /AgentPing completion event queued/u);
+    assert.doesNotMatch(log, /PushDeer notify event sent/u);
+  } finally {
+    cleanupTempWorkspace(workspace);
+  }
+}
+
+function testSubagentWithEmbeddedParentMetadataSuppressed() {
+  const workspace = makeTempWorkspace();
+  try {
+    const turnId = "turn-subagent-embedded-parent";
+    writeSession(workspace, {
+      turnId,
+      sessionId: "child-agent-session",
+      parentThreadId: "top-level-user-session",
+      threadSource: "subagent",
+      appendParentSessionMeta: true,
+      userText: "并行检查线上日志，完成后只汇报给主任务",
+      finalText: "子 Agent 的线上日志检查已完成，主任务尚未结束。",
+    });
+    runEvent(workspace, {
+      type: "agent-turn-complete",
+      "turn-id": turnId,
+      "input-messages": [{ text: "子 Agent 完成事件" }],
+    }, {
+      AGENTPING_DISABLE_LLM_SUMMARY: "1",
+    });
+
+    const log = readLog(workspace);
+    assert.match(log, /Skipping Codex subagent completion event/u);
+    assert.match(log, /"sessionId":"child-agent-session"/u);
     assert.match(log, /"parentSessionId":"top-level-user-session"/u);
     assert.doesNotMatch(log, /AgentPing completion event queued/u);
     assert.doesNotMatch(log, /PushDeer notify event sent/u);
@@ -1695,6 +1740,10 @@ const tests = {
   config_migration: () => test("config field migration", testConfigFieldMigration),
   final: () => test("final-only notification", testFinalOnlyNotification),
   subagent: () => test("Codex subagent completion is suppressed", testSubagentNotificationSuppressed),
+  subagent_parent_meta: () => test(
+    "Codex subagent with embedded parent metadata is suppressed",
+    testSubagentWithEmbeddedParentMetadataSuppressed,
+  ),
   codex_exec_subtask: () => test("declared Codex exec subtask is suppressed", testDeclaredIntermediateExecSubtaskSuppressed),
   codex_goal: () => test("Codex goal continuation is suppressed", testGoalContinuationNotificationSuppressed),
   codex_usage: () => test("Codex usage includes subagents", testCodexUsageIncludesSubagents),
@@ -1723,6 +1772,7 @@ if (command === "all") {
   await tests.config_migration();
   await tests.final();
   await tests.subagent();
+  await tests.subagent_parent_meta();
   await tests.codex_exec_subtask();
   await tests.codex_goal();
   await tests.codex_usage();
@@ -1746,7 +1796,7 @@ if (command === "all") {
 } else if (tests[command]) {
   await tests[command]();
 } else {
-  console.error("Usage: agentping test [all|format|config_migration|final|subagent|codex_exec_subtask|codex_goal|codex_usage|multica|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
+  console.error("Usage: agentping test [all|format|config_migration|final|subagent|subagent_parent_meta|codex_exec_subtask|codex_goal|codex_usage|multica|summary|summary_fallback|logs|queue|queue_retry|legacy|project|notify|claude_hooks|claude_stop|claude_modes|adapters|hermes|runtime|platform_install|claude_live|push] [--real]");
   process.exit(2);
 }
 

@@ -29,6 +29,7 @@ function plistContents() {
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
   <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>${xml(path.join(stateDir, "multica-watcher.stdout.log"))}</string>
   <key>StandardErrorPath</key><string>${xml(path.join(stateDir, "multica-watcher.stderr.log"))}</string>
@@ -72,9 +73,11 @@ export function installMulticaIntegration({ dryRun = false } = {}) {
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(plistPath, plistContents(), { mode: 0o600 });
   const domain = `gui/${process.getuid()}`;
+  const target = `${domain}/${label}`;
   launchctl(["bootout", domain, plistPath], true);
+  launchctl(["enable", target], true);
   launchctl(["bootstrap", domain, plistPath]);
-  launchctl(["kickstart", "-k", `${domain}/${label}`]);
+  launchctl(["kickstart", "-k", target]);
   return { installed: true, detail: `watcher loaded from ${plistPath}` };
 }
 

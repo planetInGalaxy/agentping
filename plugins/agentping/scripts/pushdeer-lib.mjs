@@ -1274,9 +1274,30 @@ function getSessionRoot() {
   return path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions");
 }
 
-function newestJsonlFiles(root, limit = 8) {
+function recentSessionRoots(root, modifiedSinceMs) {
+  const now = Date.now();
+  if (!Number.isFinite(modifiedSinceMs) || modifiedSinceMs <= 0 || modifiedSinceMs < now - 3 * 24 * 60 * 60 * 1000) {
+    return [root];
+  }
+
+  const roots = new Set();
+  const addDateRoot = (date, utc) => {
+    const year = utc ? date.getUTCFullYear() : date.getFullYear();
+    const month = String((utc ? date.getUTCMonth() : date.getMonth()) + 1).padStart(2, "0");
+    const day = String(utc ? date.getUTCDate() : date.getDate()).padStart(2, "0");
+    roots.add(path.join(root, String(year), month, day));
+  };
+  for (let timestamp = modifiedSinceMs - 24 * 60 * 60 * 1000; timestamp <= now + 24 * 60 * 60 * 1000; timestamp += 24 * 60 * 60 * 1000) {
+    const date = new Date(timestamp);
+    addDateRoot(date, false);
+    addDateRoot(date, true);
+  }
+  return Array.from(roots);
+}
+
+function newestJsonlFileEntries(root, limit = 8, modifiedSinceMs = 0) {
   const files = [];
-  const stack = [root];
+  const stack = recentSessionRoots(root, modifiedSinceMs);
   while (stack.length) {
     const current = stack.pop();
     let entries = [];
@@ -1292,6 +1313,7 @@ function newestJsonlFiles(root, limit = 8) {
       } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
         try {
           const stat = fs.statSync(fullPath);
+          if (Number.isFinite(modifiedSinceMs) && stat.mtimeMs < modifiedSinceMs) continue;
           files.push({ filePath: fullPath, mtimeMs: stat.mtimeMs });
         } catch {
           // Ignore files that disappear while scanning.
@@ -1301,7 +1323,11 @@ function newestJsonlFiles(root, limit = 8) {
   }
   return files
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .slice(0, limit)
+    .slice(0, limit);
+}
+
+function newestJsonlFiles(root, limit = 8, modifiedSinceMs = 0) {
+  return newestJsonlFileEntries(root, limit, modifiedSinceMs)
     .map((item) => item.filePath);
 }
 
@@ -1344,10 +1370,52 @@ function getTurnRecord(turns, turnId) {
   return turns.get(turnId);
 }
 
-function parseCodexSessionFile(filePath) {
+function boundedSessionLines(filePath, maxBytes) {
+  let handle;
+  try {
+    handle = fs.openSync(filePath, "r");
+    const size = fs.fstatSync(handle).size;
+    if (size <= maxBytes) {
+      const buffer = Buffer.alloc(size);
+      fs.readSync(handle, buffer, 0, size, 0);
+      return buffer.toString("utf8").trim().split(/\n+/);
+    }
+
+    const headerSize = Math.min(size, 256 * 1024);
+    const headerBuffer = Buffer.alloc(headerSize);
+    fs.readSync(handle, headerBuffer, 0, headerSize, 0);
+    const metadataLine = headerBuffer.toString("utf8")
+      .split("\n")
+      .find((line) => safeJsonParse(line)?.type === "session_meta");
+
+    const tailSize = Math.min(size, maxBytes);
+    const tailStart = size - tailSize;
+    const tailBuffer = Buffer.alloc(tailSize);
+    fs.readSync(handle, tailBuffer, 0, tailSize, tailStart);
+    const tailText = tailBuffer.toString("utf8");
+    const firstNewline = tailText.indexOf("\n");
+    const completeTail = firstNewline >= 0 ? tailText.slice(firstNewline + 1) : "";
+    const tailLines = completeTail.trim().split(/\n+/).filter(Boolean);
+    return metadataLine ? [metadataLine, ...tailLines] : tailLines;
+  } catch {
+    return [];
+  } finally {
+    if (handle !== undefined) {
+      try {
+        fs.closeSync(handle);
+      } catch {
+        // Ignore a close race on a session file that changed while being read.
+      }
+    }
+  }
+}
+
+function parseCodexSessionFile(filePath, { maxBytes = Number.POSITIVE_INFINITY } = {}) {
   let lines = [];
   try {
-    lines = fs.readFileSync(filePath, "utf8").trim().split(/\n+/);
+    lines = Number.isFinite(maxBytes)
+      ? boundedSessionLines(filePath, Math.max(1024, Math.trunc(maxBytes)))
+      : fs.readFileSync(filePath, "utf8").trim().split(/\n+/);
   } catch {
     return null;
   }
@@ -1594,10 +1662,14 @@ export function findFinalizedMulticaAborts({
   sinceMs = 0,
   graceMs = 5_000,
   limit = 20,
+  modifiedSinceMs = 0,
+  maxFileBytes = 8 * 1024 * 1024,
 } = {}) {
   const results = [];
-  for (const filePath of newestJsonlFiles(getSessionRoot(), limit)) {
-    const session = parseCodexSessionFile(filePath);
+  for (const filePath of newestJsonlFiles(getSessionRoot(), limit, modifiedSinceMs)) {
+    const metadata = parseCodexSessionMetadata(filePath);
+    if (metadata?.originator !== "multica-agent-sdk") continue;
+    const session = parseCodexSessionFile(filePath, { maxBytes: maxFileBytes });
     if (!session) continue;
     for (const record of session.turns) {
       if (!isFinalizedMulticaAbort(session, record, graceMs)) continue;
@@ -1656,6 +1728,7 @@ function parseCodexSessionMetadata(filePath, maxBytes = 256 * 1024) {
       return {
         filePath,
         sessionId,
+        originator: String(payload.originator || "").trim().toLowerCase(),
         parentSessionId: String(
           payload.parent_thread_id ||
           payload.parentThreadId ||

@@ -358,11 +358,40 @@ function testMulticaFinalizedAbortDetection() {
       finalAt: "2026-07-08T09:01:40.000Z",
       completedAt: "2026-07-08T09:02:00.000Z",
     });
-    const results = findFinalizedMulticaAborts({ sinceMs: 0 });
-    assert.deepEqual(results.map((item) => item.turnId), ["turn-multica-finalized"]);
+    const largeSessionPath = writeSession(workspace, {
+      turnId: "turn-multica-large-session",
+      originator: "multica-agent-sdk",
+      terminalType: "turn_aborted",
+      finalAt: "2026-07-08T09:02:59.900Z",
+      completedAt: "2026-07-08T09:03:00.000Z",
+    });
+    const largeSessionLines = fs.readFileSync(largeSessionPath, "utf8").split("\n");
+    largeSessionLines.splice(1, 0, JSON.stringify({
+      timestamp: "2026-07-08T09:01:00.000Z",
+      type: "response_item",
+      payload: {
+        type: "reasoning",
+        encrypted_content: "x".repeat(2 * 1024 * 1024),
+      },
+    }));
+    fs.writeFileSync(largeSessionPath, largeSessionLines.join("\n"));
+
+    const results = findFinalizedMulticaAborts({ sinceMs: 0, maxFileBytes: 64 * 1024 });
+    assert.deepEqual(
+      results.map((item) => item.turnId),
+      ["turn-multica-finalized", "turn-multica-large-session"],
+    );
     assert.equal(results[0].terminalType, "task_complete");
     assert.equal(results[0].sourceTerminalType, "turn_aborted");
     assert.equal(results[0].originator, "multica-agent-sdk");
+    assert.equal(results[1].finalText.includes("已经完成本地通知自测"), true);
+
+    const unchangedResults = findFinalizedMulticaAborts({
+      sinceMs: 0,
+      modifiedSinceMs: fs.statSync(largeSessionPath).mtimeMs + 1,
+      maxFileBytes: 64 * 1024,
+    });
+    assert.deepEqual(unchangedResults, []);
 
     const watcher = spawnSync(process.execPath, [multicaWatcherScript], {
       cwd: workspace.cwd,

@@ -17,7 +17,7 @@ Each platform adapter only converts its native completion hook into AgentPing's 
 - Summarizes the full user question and assistant answer through the configured summary provider: `codex exec`, a safe non-persistent Claude print process, or no LLM summary.
 - Sends the summary in PushDeer `text`.
 - Sends a separator plus the original assistant answer in PushDeer `desp`, truncated to `despMaxChars`.
-- Asks the summary model for 15 to 35 Chinese characters by default.
+- Asks the summary model for 20 to 45 Chinese characters by default.
 - Does not hard-truncate LLM summaries; semantic completeness is preferred if the model slightly exceeds the configured range.
 - Keeps approximately the first and last 100 characters of the answer at punctuation boundaries, without a total `desp` limit by default.
 - Supports notification modes: always, long tasks only, errors only, or off.
@@ -101,7 +101,7 @@ Useful install flags:
 ```bash
 node scripts/install.mjs --summary-model gpt-5.4-mini
 node scripts/install.mjs --claude-summary-model sonnet
-node scripts/install.mjs --summary-min-chars 15 --summary-max-chars 35
+node scripts/install.mjs --summary-min-chars 20 --summary-max-chars 45
 node scripts/install.mjs --llm-timeout-ms 15000
 node scripts/install.mjs --desp-max-chars -1
 node scripts/install.mjs --desp-separator "\n***\n"
@@ -234,8 +234,8 @@ The notifier config stores local runtime settings:
       "summaryTimeoutMs": 16000
     }
   },
-  "summaryMinChars": 15,
-  "summaryMaxChars": 35,
+  "summaryMinChars": 20,
+  "summaryMaxChars": 45,
   "summaryFallbackText": "摘要未生成，请看原回答",
   "despMaxChars": -1,
   "despSeparator": "\n***\n",
@@ -273,8 +273,8 @@ Optional environment variables:
 ```bash
 export AGENTPING_SUMMARY_MODEL=gpt-5.4-mini
 export AGENTPING_CLAUDE_SUMMARY_MODEL=sonnet
-export AGENTPING_SUMMARY_MIN_CHARS=15
-export AGENTPING_SUMMARY_MAX_CHARS=35
+export AGENTPING_SUMMARY_MIN_CHARS=20
+export AGENTPING_SUMMARY_MAX_CHARS=45
 export AGENTPING_SUMMARY_FALLBACK_TEXT='摘要未生成，请看原回答'
 export AGENTPING_LLM_TIMEOUT_MS=16000
 export AGENTPING_DESP_MAX_CHARS=-1
@@ -338,7 +338,7 @@ agentping config set-summary-provider codex --agent hermes
 agentping config set-summary-model gpt-5.4-mini --agent hermes
 agentping config set-timeout 16000 --agent hermes
 agentping config set-enabled off --agent openclaw
-agentping config set-summary-range 15 35
+agentping config set-summary-range 20 45
 agentping config set-summary-fallback "摘要未生成，请看原回答"
 agentping config set-timeout 15000
 agentping config set-desp-max -1

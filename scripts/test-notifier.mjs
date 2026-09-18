@@ -540,7 +540,7 @@ function readLog(workspace) {
 function testFormatHelpers() {
   assert.equal(DEFAULT_CLAUDE_SUMMARY_MODEL, "sonnet");
   assert.equal(DEFAULT_DESP_SEPARATOR, "\n***\n");
-  assert.equal(DEFAULT_TITLE_TEMPLATE, "### {summary}");
+  assert.equal(DEFAULT_TITLE_TEMPLATE, "{summary}");
   assert.equal(DEFAULT_DESP_TEMPLATE, "{separator}>>>> ### 用时: {durationZh}\n### 回答摘录:\n{finalTextPreview}");
   assert.equal(DEFAULT_FINAL_TEXT_PREVIEW_HEAD_CHARS, 100);
   assert.equal(DEFAULT_FINAL_TEXT_PREVIEW_TAIL_CHARS, 100);

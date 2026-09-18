@@ -81,25 +81,50 @@ function summaryInput({ userText, finalText }) {
   ].join("\n");
 }
 
+function isUnsupportedCodexModel(result) {
+  if (result?.status === 0) return false;
+  const output = `${result?.stderr || ""}\n${result?.stdout || ""}`;
+  return /Unknown model\b|Model metadata for .* not found|model[^\n]*is not supported/iu.test(output);
+}
+
+function codexReportedModel(stderr) {
+  return String(stderr || "").match(/^model:\s*(\S+)\s*$/mu)?.[1] || "";
+}
+
 function runCodexSummary({ model, outputFile, prompt, input, cwd, timeoutMs }) {
-  const result = spawnSync("codex", codexSummaryExecArgs({ model, outputFile, prompt }), {
-    cwd,
-    input,
-    encoding: "utf8",
-    timeout: timeoutMs,
-    env: {
-      ...process.env,
-      AGENTPING_DISABLE_LLM_SUMMARY: "1",
-      AGENTPING_SUPPRESS_NOTIFY: "1",
-      CODEX_PUSHDEER_DISABLE_LLM_SUMMARY: "1",
-      CODEX_PUSHDEER_SUPPRESS_NOTIFY: "1",
+  const run = (summaryModel) => spawnSync(
+    "codex",
+    codexSummaryExecArgs({ model: summaryModel, outputFile, prompt }),
+    {
+      cwd,
+      input,
+      encoding: "utf8",
+      timeout: timeoutMs,
+      env: {
+        ...process.env,
+        AGENTPING_DISABLE_LLM_SUMMARY: "1",
+        AGENTPING_SUPPRESS_NOTIFY: "1",
+        CODEX_PUSHDEER_DISABLE_LLM_SUMMARY: "1",
+        CODEX_PUSHDEER_SUPPRESS_NOTIFY: "1",
+      },
     },
-  });
+  );
+
+  let result = run(model);
+  let fallbackFromModel = "";
+  if (model && model !== "auto" && isUnsupportedCodexModel(result)) {
+    fallbackFromModel = model;
+    fs.rmSync(outputFile, { force: true });
+    result = run("");
+  }
+  const resolvedModel = codexReportedModel(result.stderr) || (fallbackFromModel ? "auto" : model || "auto");
   return {
     result,
     text: result.status === 0 && fs.existsSync(outputFile)
       ? fs.readFileSync(outputFile, "utf8")
       : "",
+    model: resolvedModel,
+    fallbackFromModel,
     diagnostics: codexTransportDiagnostics(result.stderr, {
       timedOut: result.signal === "SIGTERM",
     }),
@@ -174,11 +199,22 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
       : runCodexSummary({ model, outputFile, prompt, input, cwd, timeoutMs });
     const elapsedMs = Date.now() - startedAt;
     const { result, diagnostics } = command;
+    const resolvedModel = command.model || model;
+    if (command.fallbackFromModel) {
+      logEvent("info", "Configured Codex summary model unavailable; retried with Codex default", {
+        platform,
+        summaryProvider: provider,
+        configuredModel: command.fallbackFromModel,
+        model: resolvedModel,
+        elapsedMs,
+      });
+    }
     if (result.status !== 0) {
       logEvent("warn", "LLM summary command failed", {
         platform,
         summaryProvider: provider,
-        model,
+        model: resolvedModel,
+        configuredModel: command.fallbackFromModel || undefined,
         status: result.status,
         signal: result.signal,
         elapsedMs,
@@ -186,11 +222,11 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
         ...diagnostics,
         ...logTextMeta("stderr", result.stderr, { config, maxChars: 1000 }),
       });
-      return { text: "", elapsedMs, error: result.signal || `exit_${result.status}` };
+      return { text: "", model: resolvedModel, elapsedMs, error: result.signal || `exit_${result.status}` };
     }
 
     const summary = normalizeSummary(command.text);
-    if (!summary) return { text: "", elapsedMs, error: "empty" };
+    if (!summary) return { text: "", model: resolvedModel, elapsedMs, error: "empty" };
     const summaryChars = charLength(summary);
     const hardMaxChars = summarySafetyMaxChars(config.summaryMaxChars);
     const invalidReason = summaryChars > hardMaxChars
@@ -200,7 +236,7 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
       logEvent("warn", "LLM summary rejected as invalid", {
         platform,
         summaryProvider: provider,
-        model,
+        model: resolvedModel,
         elapsedMs,
         inputChars: charLength(input),
         summaryChars,
@@ -209,12 +245,12 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
         reason: invalidReason,
         ...diagnostics,
       });
-      return { text: "", elapsedMs, error: invalidReason };
+      return { text: "", model: resolvedModel, elapsedMs, error: invalidReason };
     }
     logEvent("info", "LLM summary generated", {
       platform,
       summaryProvider: provider,
-      model,
+      model: resolvedModel,
       elapsedMs,
       inputChars: charLength(input),
       summaryChars,
@@ -224,13 +260,13 @@ export function summarizeWithLlm({ platform, finalText, userText, config, cwd = 
       logEvent("info", "LLM summary outside configured length range", {
         platform,
         summaryProvider: provider,
-        model,
+        model: resolvedModel,
         summaryChars,
         summaryMinChars: config.summaryMinChars,
         summaryMaxChars: config.summaryMaxChars,
       });
     }
-    return { text: summary, elapsedMs, error: "" };
+    return { text: summary, model: resolvedModel, elapsedMs, error: "" };
   } catch (error) {
     const elapsedMs = Date.now() - startedAt;
     logEvent("warn", "LLM summary command errored", {
@@ -308,7 +344,7 @@ export async function sendCompletionNotification({
   const llmSummary = summarizeWithLlm({ platform, finalText, userText, config, cwd });
   const summarySource = llmSummary.text ? "llm" : "fallback";
   const summaryText = llmSummary.text || config.summaryFallbackText || DEFAULT_SUMMARY_FALLBACK_TEXT;
-  const summaryModel = config.agentSummaryModel || config.summaryModel || DEFAULT_SUMMARY_MODEL;
+  const summaryModel = llmSummary.model || config.agentSummaryModel || config.summaryModel || DEFAULT_SUMMARY_MODEL;
   const { title, desp } = formatNotificationFields({
     summary: summaryText,
     finalText,

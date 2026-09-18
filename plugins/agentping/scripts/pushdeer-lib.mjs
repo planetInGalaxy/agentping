@@ -280,7 +280,7 @@ export function codexSummaryExecArgs({ model, outputFile, prompt }) {
     "--disable", "hooks",
     "--disable", "plugins",
     "--ephemeral",
-    "-m", model,
+    ...(model && model !== "auto" ? ["-m", model] : []),
     "--output-last-message", outputFile,
     prompt,
   ];

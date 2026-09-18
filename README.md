@@ -26,6 +26,7 @@ Each platform adapter only converts its native completion hook into AgentPing's 
 - Rotates local notifier logs so troubleshooting data does not grow without bound.
 - Keeps local logs privacy-safe by default; full text/stderr previews require `debugLogs`.
 - Records summary source, elapsed time, and fallback error reason in notifier logs.
+- Retries with the current Codex default when a configured Codex summary model has been removed or is no longer supported.
 - Appends the task model and available token usage to the notification by default.
 - Aggregates Codex child-agent usage into the top-level task notification without sending child notifications.
 - Includes local self-test commands that use temporary files and dry-run PushDeer sends.
